@@ -1,0 +1,49 @@
+'use client'
+
+import { ChangeEvent, useMemo, useState } from 'react'
+import { CheckCircle2, Database, FileUp, ShieldCheck, UploadCloud, XCircle } from 'lucide-react'
+import { parseCsv, validateHeaders, type ImportKind } from '@/lib/data/import'
+
+const kinds: { id: ImportKind; label: string; description: string }[] = [
+  { id: 'lanes', label: 'Lane records', description: 'Origin, destination, mode and capacity realization.' },
+  { id: 'contracts', label: 'Contracts', description: 'Committed capacity, rates, carriers and dates.' },
+  { id: 'shipments', label: 'Shipments', description: 'Actual movement records and volumes.' },
+  { id: 'carriers', label: 'Carriers', description: 'Carrier acceptance, rejection and cancellation metrics.' },
+]
+
+export default function ImportPage() {
+  const [kind, setKind] = useState<ImportKind>('lanes')
+  const [file, setFile] = useState<File | null>(null)
+  const [error, setError] = useState('')
+  const [rows, setRows] = useState<string[][]>([])
+
+  const selected = kinds.find(k => k.id === kind)!
+  const validation = useMemo(() => rows.length ? validateHeaders(rows[0], kind) : null, [rows, kind])
+
+  async function onFile(event: ChangeEvent<HTMLInputElement>) {
+    const next = event.target.files?.[0]
+    setError(''); setRows([]); setFile(next ?? null)
+    if (!next) return
+    if (next.size > 10 * 1024 * 1024) { setError('File exceeds the 10 MB upload limit.'); return }
+    if (!next.name.toLowerCase().endsWith('.csv')) { setError('For this first production ingestion path, upload a UTF-8 CSV file.'); return }
+    try {
+      const parsed = parseCsv(await next.text())
+      if (!parsed.length) { setError('The file contains no readable rows.'); return }
+      setRows(parsed)
+    } catch { setError('The file could not be parsed. Check that it is a valid CSV.'); }
+  }
+
+  return <main className="min-h-screen bg-[#f7f9fc] px-5 py-8 text-[#08111f] sm:px-8 sm:py-10"><div className="mx-auto max-w-[1080px]">
+    <div className="border-b border-[#dbe2ec] pb-7"><p className="text-[11px] font-extrabold uppercase tracking-[.18em] text-[#1769e0]">Data ingestion</p><h1 className="mt-2 text-3xl font-black tracking-[-.04em]">Connect operational data</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-[#66758a]">Import records from your organization. GhostLane validates the file before anything is written to your workspace.</p></div>
+    <div className="mt-7 grid gap-6 lg:grid-cols-[280px_1fr]">
+      <aside className="rounded-2xl border border-[#dbe2ec] bg-white p-4"><p className="px-3 pb-3 text-[10px] font-extrabold uppercase tracking-[.14em] text-[#8490a0]">Data type</p>{kinds.map(item => <button key={item.id} onClick={() => {setKind(item.id);setRows([]);setFile(null);setError('')}} className={`mb-1 w-full rounded-xl p-3 text-left transition ${kind===item.id?'bg-[#edf4ff]':'hover:bg-[#f6f8fb]'}`}><div className="text-xs font-extrabold">{item.label}</div><div className="mt-1 text-[11px] leading-4 text-[#788596]">{item.description}</div></button>)}</aside>
+      <section className="rounded-2xl border border-[#dbe2ec] bg-white p-6 sm:p-8"><div className="flex items-start gap-3"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#edf4ff] text-[#1769e0]"><Database size={18}/></div><div><h2 className="text-sm font-extrabold">{selected.label}</h2><p className="mt-1 text-xs leading-5 text-[#788596]">{selected.description}</p></div></div>
+        <label className="mt-7 flex min-h-[220px] cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-[#bfcbd9] bg-[#fafbfd] px-6 text-center hover:border-[#1769e0] hover:bg-[#f7faff]"><UploadCloud size={26} className="text-[#1769e0]"/><span className="mt-4 text-sm font-extrabold">Choose a CSV file</span><span className="mt-1 text-xs text-[#8490a0]">UTF-8 CSV · maximum 10 MB</span><input type="file" accept=".csv,text/csv" className="hidden" onChange={onFile}/></label>
+        {file && <div className="mt-4 flex items-center justify-between rounded-xl border border-[#dbe2ec] p-4"><div><p className="text-xs font-bold">{file.name}</p><p className="mt-1 text-[11px] text-[#8490a0]">{(file.size/1024).toFixed(1)} KB · {rows.length ? `${rows.length-1} data rows` : 'not readable'}</p></div>{rows.length ? <CheckCircle2 size={18} className="text-[#187650]"/> : <XCircle size={18} className="text-[#b13b3b"/>}</div>}
+        {error && <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-xs font-semibold text-red-700">{error}</div>}
+        {validation && <div className={`mt-4 rounded-xl border p-4 ${validation.missing.length ? 'border-amber-200 bg-amber-50' : 'border-green-200 bg-green-50'}`}><div className="flex items-center gap-2 text-xs font-extrabold">{validation.missing.length ? <XCircle size={16}/> : <CheckCircle2 size={16}/>} {validation.missing.length ? 'Validation requires attention' : 'Headers validated'}</div>{validation.missing.length ? <p className="mt-2 text-xs leading-5">Missing required columns: <strong>{validation.missing.join(', ')}</strong></p> : <p className="mt-2 text-xs leading-5">The required columns for {selected.label.toLowerCase()} are present.</p>}</div>}
+        {rows.length > 1 && !validation?.missing.length && <><div className="mt-7 flex items-center gap-2 border-b border-[#edf0f5] pb-3"><FileUp size={15} className="text-[#1769e0]"/><h3 className="text-xs font-extrabold">Preview</h3></div><div className="mt-3 overflow-x-auto rounded-xl border border-[#e1e7ef]"><table className="w-full min-w-[650px] text-left text-[11px]"><thead className="bg-[#fafbfd]"><tr>{rows[0].map(h=><th key={h} className="px-3 py-2.5 font-extrabold uppercase tracking-wide text-[#8490a0]">{h}</th>)}</tr></thead><tbody>{rows.slice(1,6).map((r,i)=><tr key={i} className="border-t border-[#edf0f5]">{rows[0].map((_,j)=><td key={j} className="px-3 py-2.5">{r[j] ?? ''}</td>)}</tr>)}</tbody></table></div><div className="mt-5 flex items-center gap-2 rounded-xl bg-[#f6f8fb] p-3 text-[11px] text-[#66758a]"><ShieldCheck size={15}/> Nothing has been imported yet. Final database insertion is intentionally gated behind the authenticated server ingestion endpoint.</div></>}
+      </section>
+    </div>
+  </div></main>
+}
