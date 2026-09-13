@@ -10,17 +10,21 @@ export async function middleware(request: NextRequest) {
       cookies: {
         getAll() { return request.cookies.getAll() },
         setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) => request.cookies.set(name, value))
+          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))
           response = NextResponse.next({ request })
           cookiesToSet.forEach(({ name, value, options }) => response.cookies.set(name, value, options))
         },
       },
     }
   )
+
   const { data: { user } } = await supabase.auth.getUser()
-  const isPublic = request.nextUrl.pathname === '/login' || request.nextUrl.pathname.startsWith('/auth')
+  const pathname = request.nextUrl.pathname
+  const isPublic = pathname === '/' || pathname === '/login' || pathname === '/signup' || pathname.startsWith('/auth')
+
   if (!user && !isPublic) return NextResponse.redirect(new URL('/login', request.url))
-  if (user && request.nextUrl.pathname === '/login') return NextResponse.redirect(new URL('/', request.url))
+  if (user && (pathname === '/login' || pathname === '/signup')) return NextResponse.redirect(new URL('/', request.url))
+
   return response
 }
 
