@@ -26,13 +26,23 @@ create table if not exists public.shipment_help_requests (
 );
 create index if not exists shipment_help_org_status_idx on public.shipment_help_requests (organization_id, status, created_at desc);
 
+create or replace function public.set_shipment_operation_org() returns trigger language plpgsql security definer set search_path=public as $$
+begin
+  if new.organization_id is null then select s.organization_id into new.organization_id from public.shipments s where s.shipment_id=new.shipment_id limit 1; end if;
+  return new;
+end; $$;
+
+drop trigger if exists shipment_events_set_org on public.shipment_events;
+create trigger shipment_events_set_org before insert on public.shipment_events for each row execute function public.set_shipment_operation_org();
+drop trigger if exists shipment_help_set_org on public.shipment_help_requests;
+create trigger shipment_help_set_org before insert on public.shipment_help_requests for each row execute function public.set_shipment_operation_org();
+
 alter table public.shipment_events enable row level security;
 alter table public.shipment_help_requests enable row level security;
 
 create policy "shipment events follow shipment organization" on public.shipment_events
 for all using (exists (select 1 from public.shipments s where s.shipment_id=shipment_events.shipment_id and s.organization_id=shipment_events.organization_id))
 with check (exists (select 1 from public.shipments s where s.shipment_id=shipment_events.shipment_id and s.organization_id=shipment_events.organization_id));
-
 create policy "shipment help follows shipment organization" on public.shipment_help_requests
 for all using (exists (select 1 from public.shipments s where s.shipment_id=shipment_help_requests.shipment_id and s.organization_id=shipment_help_requests.organization_id))
 with check (exists (select 1 from public.shipments s where s.shipment_id=shipment_help_requests.shipment_id and s.organization_id=shipment_help_requests.organization_id));
