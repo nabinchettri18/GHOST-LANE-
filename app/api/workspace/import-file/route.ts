@@ -15,6 +15,18 @@ const required = (v: string, field: string, row: number) => { const value = text
 const numberOrNull = (v: string, field: string, row: number) => { const value = text(v); if (!value) return null; const parsed = Number(value.replace(/,/g, '')); if (!Number.isFinite(parsed)) throw new Error(`${field} must be numeric on row ${row}`); return parsed }
 const bounded = (v: string, field: string, row: number) => { const n = numberOrNull(v, field, row); return n == null ? null : Math.min(100, Math.max(0, n)) }
 const laneKey = (origin: string, destination: string) => `${text(origin).toLowerCase()}|${text(destination).toLowerCase()}`
+const normalizeHeader = (value: string) => value.replace(/^\uFEFF/, '').trim().toLowerCase().replace(/\s+/g, '_')
+
+function detectImportKind(headers: string[], fallback: ImportKind): ImportKind {
+  const normalized = headers.map(normalizeHeader)
+  // Most specific schemas win so a shipment/master export containing carrier,
+  // origin and destination can never be mistaken for a carrier-only file.
+  if (normalized.includes('shipment_id')) return 'shipments'
+  if (normalized.includes('contract_id')) return 'contracts'
+  if (normalized.includes('carrier') && !normalized.includes('origin') && !normalized.includes('destination')) return 'carriers'
+  if (normalized.includes('origin') && normalized.includes('destination')) return 'lanes'
+  return fallback
+}
 
 async function refreshLaneVolumes(db: ReturnType<typeof createAdminClient>, org: string, ids: string[], contracts: boolean, shipments: boolean) {
   const unique = [...new Set(ids)]
@@ -41,8 +53,8 @@ export async function POST(request: Request) {
   const supabase = await createClient(); const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if (!allowRequest(`import:${user.id}`, 10, 60_000)) return NextResponse.json({ error: 'Too many import attempts. Please wait a minute.' }, { status: 429 })
-  const form = await request.formData(); const kind = String(form.get('kind') || '') as ImportKind; const file = form.get('file')
-  if (!kinds.includes(kind)) return NextResponse.json({ error: 'Invalid dataset type' }, { status: 400 })
+  const form = await request.formData(); const submittedKind = String(form.get('kind') || '') as ImportKind; const file = form.get('file')
+  if (!kinds.includes(submittedKind)) return NextResponse.json({ error: 'Invalid dataset type' }, { status: 400 })
   if (!(file instanceof File)) return NextResponse.json({ error: 'A file is required' }, { status: 400 })
   if (!file.size) return NextResponse.json({ error: 'File is empty' }, { status: 400 })
   if (file.size > MAX_BYTES) return NextResponse.json({ error: 'File exceeds the 10 MB limit' }, { status: 413 })
@@ -55,6 +67,7 @@ export async function POST(request: Request) {
     const rows = await parseOperationalFile(file)
     if (rows.length < 2) throw new Error('The file must contain a header and at least one data row')
     if (rows.length - 1 > MAX_ROWS) throw new Error('Maximum 5,000 data rows per import')
+    const kind = detectImportKind(rows[0], submittedKind)
     const validation = validateHeaders(rows[0], kind); if (validation.missing.length) throw new Error(`Missing required columns: ${validation.missing.join(', ')}`)
     const headers = validation.normalized, index = Object.fromEntries(headers.map((header, i) => [header, i])), value = (row: string[], key: string) => row[index[key]] ?? ''
     const dataRows = rows.slice(1).filter(row => row.some(Boolean)); if (!dataRows.length) throw new Error('No data rows were found after the header')
@@ -68,6 +81,17 @@ export async function POST(request: Request) {
       const payload = dataRows.map((row, i) => { const origin = required(value(row, 'origin'), 'origin', i + 2), destination = required(value(row, 'destination'), 'destination', i + 2), key = laneKey(origin, destination); if (existingKeys.has(key)) return null; existingKeys.add(key); const distance = numberOrNull(value(row, 'distance_km'), 'distance_km', i + 2); return { organization_id: organizationId, origin, destination, mode: text(value(row, 'mode')).slice(0, 100) || null, distance_km: distance == null ? null : Math.max(0, Math.round(distance)), contracted_volume: Math.max(0, Math.round(numberOrNull(value(row, 'contracted_volume'), 'contracted_volume', i + 2) ?? 0)), materialized_volume: Math.max(0, Math.round(numberOrNull(value(row, 'materialized_volume'), 'materialized_volume', i + 2) ?? 0)), carrier: text(value(row, 'carrier')).slice(0, 500) || null, risk_score: bounded(value(row, 'risk_score'), 'risk_score', i + 2) } }).filter((row): row is NonNullable<typeof row> => row !== null)
       if (payload.length) { const { error } = await db.from('lanes').insert(payload); if (error) throw new Error(`Lane import failed: ${error.message}`); inserted = payload.length }
       skipped = dataRows.length - inserted
+    } else if (kind === 'carriers') {
+      const names = dataRows.map((row, i) => required(value(row, 'carrier'), 'carrier', i + 2))
+      const { data: existing } = await db.from('carriers').select('carrier').eq('organization_id', organizationId).in('carrier', names)
+      const existingNames = new Set((existing ?? []).map(row => String(row.carrier).trim().toLowerCase()))
+      const seen = new Set(existingNames)
+      const payload = dataRows.map((row, i) => {
+        const carrier = names[i]; const key = carrier.toLowerCase(); if (seen.has(key)) return null; seen.add(key)
+        return { organization_id: organizationId, carrier, acceptance_rate: bounded(value(row, 'acceptance_rate'), 'acceptance_rate', i + 2), rejection_rate: bounded(value(row, 'rejection_rate'), 'rejection_rate', i + 2), cancellation_rate: bounded(value(row, 'cancellation_rate'), 'cancellation_rate', i + 2), realization_rate: bounded(value(row, 'realization_rate'), 'realization_rate', i + 2) }
+      }).filter((row): row is NonNullable<typeof row> => row !== null)
+      if (payload.length) { const { error } = await db.from('carriers').insert(payload); if (error) throw new Error(`Carrier import failed: ${error.message}`) }
+      inserted = payload.length; skipped = dataRows.length - inserted
     } else {
       const missing = new Map<string, { origin: string; destination: string }>()
       for (const [i, row] of dataRows.entries()) { const origin = required(value(row, 'origin'), 'origin', i + 2), destination = required(value(row, 'destination'), 'destination', i + 2), key = laneKey(origin, destination); if (!laneMap.has(key)) missing.set(key, { origin, destination }) }
@@ -90,6 +114,6 @@ export async function POST(request: Request) {
         inserted = payload.length; skipped = dataRows.length - inserted; for (const row of dataRows) { const id = laneMap.get(laneKey(value(row, 'origin'), value(row, 'destination'))); if (id) affectedLanes.push(id) }; await refreshLaneVolumes(db, organizationId, affectedLanes, false, true)
       }
     }
-    return NextResponse.json({ imported: inserted, skipped, dataset: kind, fileType: filename.split('.').pop(), warnings, message: skipped ? `${inserted} imported, ${skipped} duplicate rows skipped.` : `${inserted} records imported successfully.` })
+    return NextResponse.json({ imported: inserted, skipped, dataset: kind, submittedDataset: submittedKind, fileType: filename.split('.').pop(), warnings, message: skipped ? `${inserted} imported, ${skipped} duplicate rows skipped.` : `${inserted} records imported successfully.` })
   } catch (error) { console.error('import failed', error); return NextResponse.json({ error: error instanceof Error ? error.message : 'Import failed' }, { status: 422 }) }
 }
