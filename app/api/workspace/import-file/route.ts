@@ -15,6 +15,16 @@ const n = (v: string, field: string, row: number) => {
   return x
 }
 
+const optionalNumber = (v: string, field: string, row: number) => {
+  const x = v.trim()
+  return x === '' ? null : n(x, field, row)
+}
+
+const optionalText = (v: string) => {
+  const x = v.trim()
+  return x ? x.slice(0, 500) : null
+}
+
 const t = (v: string, field: string, row: number) => {
   const x = v.trim()
   if (!x) throw new Error(`${field} is required on row ${row}`)
@@ -131,6 +141,7 @@ export async function POST(request: Request) {
     const headers = validation.normalized
     const index = Object.fromEntries(headers.map((h, i) => [h, i]))
     const value = (r: string[], key: string) => r[index[key]] ?? ''
+    const has = (key: string) => index[key] !== undefined
     const dataRows = rows.slice(1).filter(r => r.some(Boolean))
     if (dataRows.length > 5000) throw new Error('Maximum 5,000 rows per import')
 
@@ -153,12 +164,12 @@ export async function POST(request: Request) {
         organization_id,
         origin: t(value(r, 'origin'), 'origin', i + 2),
         destination: t(value(r, 'destination'), 'destination', i + 2),
-        mode: t(value(r, 'mode'), 'mode', i + 2),
-        distance_km: index.distance_km === undefined || !value(r, 'distance_km') ? null : Math.round(n(value(r, 'distance_km'), 'distance_km', i + 2)),
-        contracted_volume: Math.max(0, Math.round(n(value(r, 'contracted_volume'), 'contracted_volume', i + 2))),
-        materialized_volume: Math.max(0, Math.round(n(value(r, 'materialized_volume'), 'materialized_volume', i + 2))),
-        carrier: index.carrier === undefined ? null : value(r, 'carrier').trim().slice(0, 500) || null,
-        risk_score: index.risk_score === undefined || !value(r, 'risk_score') ? null : Math.min(100, Math.max(0, n(value(r, 'risk_score'), 'risk_score', i + 2))),
+        mode: optionalText(value(r, 'mode')),
+        distance_km: optionalNumber(value(r, 'distance_km'), 'distance_km', i + 2),
+        contracted_volume: optionalNumber(value(r, 'contracted_volume'), 'contracted_volume', i + 2),
+        materialized_volume: optionalNumber(value(r, 'materialized_volume'), 'materialized_volume', i + 2),
+        carrier: optionalText(value(r, 'carrier')),
+        risk_score: optionalNumber(value(r, 'risk_score'), 'risk_score', i + 2),
       }))
       const { error } = await supabase.from('lanes').insert(payload)
       if (error) throw new Error(error.message)
@@ -166,10 +177,10 @@ export async function POST(request: Request) {
       const payload = dataRows.map((r, i) => ({
         organization_id,
         name: t(value(r, 'carrier'), 'carrier', i + 2),
-        acceptance_rate: n(value(r, 'acceptance_rate'), 'acceptance_rate', i + 2),
-        rejection_rate: n(value(r, 'rejection_rate'), 'rejection_rate', i + 2),
-        cancellation_rate: n(value(r, 'cancellation_rate'), 'cancellation_rate', i + 2),
-        realization_rate: index.realization_rate === undefined || !value(r, 'realization_rate') ? null : n(value(r, 'realization_rate'), 'realization_rate', i + 2),
+        acceptance_rate: optionalNumber(value(r, 'acceptance_rate'), 'acceptance_rate', i + 2),
+        rejection_rate: optionalNumber(value(r, 'rejection_rate'), 'rejection_rate', i + 2),
+        cancellation_rate: optionalNumber(value(r, 'cancellation_rate'), 'cancellation_rate', i + 2),
+        realization_rate: optionalNumber(value(r, 'realization_rate'), 'realization_rate', i + 2),
       }))
       const { error } = await supabase.from('carriers').insert(payload)
       if (error) throw new Error(error.message)
@@ -209,10 +220,10 @@ export async function POST(request: Request) {
             contract_id: t(value(r, 'contract_id'), 'contract_id', i + 2),
             lane_id,
             carrier: t(value(r, 'carrier'), 'carrier', i + 2),
-            contracted_volume: Math.max(0, Math.round(n(value(r, 'contracted_volume'), 'contracted_volume', i + 2))),
-            contract_rate: Math.max(0, n(value(r, 'contract_rate'), 'contract_rate', i + 2)),
-            start_date: t(value(r, 'start_date'), 'start_date', i + 2),
-            end_date: t(value(r, 'end_date'), 'end_date', i + 2),
+            contracted_volume: optionalNumber(value(r, 'contracted_volume'), 'contracted_volume', i + 2),
+            contract_rate: optionalNumber(value(r, 'contract_rate'), 'contract_rate', i + 2),
+            start_date: optionalText(value(r, 'start_date')),
+            end_date: optionalText(value(r, 'end_date')),
           }
         })
         const { error } = await supabase.from('contracts').insert(payload)
@@ -227,9 +238,9 @@ export async function POST(request: Request) {
             shipment_id: t(value(r, 'shipment_id'), 'shipment_id', i + 2),
             lane_id,
             carrier: t(value(r, 'carrier'), 'carrier', i + 2),
-            shipment_date: t(value(r, 'shipment_date'), 'shipment_date', i + 2),
-            volume: Math.max(0, Math.round(n(value(r, 'volume'), 'volume', i + 2))),
-            status: t(value(r, 'status'), 'status', i + 2),
+            shipment_date: optionalText(value(r, 'shipment_date')),
+            volume: optionalNumber(value(r, 'volume'), 'volume', i + 2),
+            status: optionalText(value(r, 'status')),
           }
         })
         const { error } = await supabase.from('shipments').insert(payload)
@@ -238,7 +249,15 @@ export async function POST(request: Request) {
       }
     }
 
-    return NextResponse.json({ imported: dataRows.length, dataset: kind, fileType: filename.split('.').pop() })
+    const optionalMissing = validation.optionalMissing
+    return NextResponse.json({
+      imported: dataRows.length,
+      dataset: kind,
+      fileType: filename.split('.').pop(),
+      warnings: optionalMissing.length
+        ? [`Optional fields not provided: ${optionalMissing.join(', ')}`]
+        : [],
+    })
   } catch (error) {
     console.error('import failed', error)
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Import failed' }, { status: 422 })
