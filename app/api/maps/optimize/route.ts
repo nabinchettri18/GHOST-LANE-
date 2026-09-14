@@ -28,15 +28,18 @@ async function pollCuOpt(reqId: string, apiKey: string) {
 }
 
 export async function POST(req: NextRequest) {
-  // NVIDIA Build issues an API key for its hosted cuOpt endpoint. Support the
-  // Build-standard name as well as the legacy GhostLane name for migration.
-  const apiKey = process.env.NVIDIA_API_KEY || process.env.NVIDIA_CUOPT_API_KEY
+  // Accept the exact NVCF key name used by NVIDIA Build, plus the previous
+  // GhostLane names so existing deployments keep working during migration.
+  const apiKey =
+    process.env.NVCF_API_KEY ||
+    process.env.NVIDIA_API_KEY ||
+    process.env.NVIDIA_CUOPT_API_KEY
 
   if (!apiKey) {
     return NextResponse.json({
       configured: false,
       provider: 'nvidia-cuopt',
-      message: 'NVIDIA cuOpt is not configured. Add NVIDIA_API_KEY in Vercel environment variables.',
+      message: 'NVIDIA cuOpt is not configured. Add NVCF_API_KEY in Vercel environment variables.',
     }, { status: 503 })
   }
 
@@ -50,8 +53,6 @@ export async function POST(req: NextRequest) {
   const demand = Math.max(0, Number(body.demand ?? 1))
   const capacity = Math.max(demand, Number(body.vehicleCapacity ?? demand))
 
-  // A minimal valid CVRP problem. The route distance/time comes from
-  // GhostLane's real map routing layer; cuOpt optimizes the dispatch decision.
   const data = {
     cost_waypoint_graph_data: null,
     travel_time_waypoint_graph_data: null,
