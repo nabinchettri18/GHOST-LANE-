@@ -21,6 +21,49 @@ const t = (v: string, field: string, row: number) => {
   return x.slice(0, 500)
 }
 
+type DbClient = Awaited<ReturnType<typeof createClient>>
+
+async function refreshLaneVolumes(
+  supabase: DbClient,
+  organizationId: string,
+  refreshContracted: boolean,
+  refreshMaterialized: boolean,
+) {
+  const [{ data: lanes, error: laneError }, { data: contracts, error: contractError }, { data: shipments, error: shipmentError }] = await Promise.all([
+    supabase.from('lanes').select('id').eq('organization_id', organizationId),
+    refreshContracted
+      ? supabase.from('contracts').select('lane_id,contracted_volume').eq('organization_id', organizationId)
+      : Promise.resolve({ data: [], error: null }),
+    refreshMaterialized
+      ? supabase.from('shipments').select('lane_id,volume,status').eq('organization_id', organizationId)
+      : Promise.resolve({ data: [], error: null }),
+  ])
+  if (laneError) throw laneError
+  if (contractError) throw contractError
+  if (shipmentError) throw shipmentError
+
+  const contractedByLane = new Map<string, number>()
+  for (const row of contracts ?? []) {
+    contractedByLane.set(row.lane_id, (contractedByLane.get(row.lane_id) ?? 0) + Math.max(0, Number(row.contracted_volume ?? 0)))
+  }
+
+  const materializedByLane = new Map<string, number>()
+  for (const row of shipments ?? []) {
+    const status = String(row.status ?? '').trim().toLowerCase()
+    if (['cancelled', 'canceled', 'rejected', 'void'].includes(status)) continue
+    materializedByLane.set(row.lane_id, (materializedByLane.get(row.lane_id) ?? 0) + Math.max(0, Number(row.volume ?? 0)))
+  }
+
+  for (const lane of lanes ?? []) {
+    const patch: Record<string, number> = {}
+    if (refreshContracted) patch.contracted_volume = Math.round(contractedByLane.get(lane.id) ?? 0)
+    if (refreshMaterialized) patch.materialized_volume = Math.round(materializedByLane.get(lane.id) ?? 0)
+    if (Object.keys(patch).length === 0) continue
+    const { error } = await supabase.from('lanes').update(patch).eq('id', lane.id).eq('organization_id', organizationId)
+    if (error) throw error
+  }
+}
+
 export async function POST(request: Request) {
   if (!isSameOrigin(request)) return NextResponse.json({ error: 'Cross-origin request rejected' }, { status: 403 })
 
@@ -46,9 +89,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Unsupported file type' }, { status: 415 })
   }
 
-  // Read membership through the authenticated client first. If RLS prevents the
-  // lookup, use the server-only admin client for the same user, while keeping the
-  // role check mandatory. This fixes false 403s without weakening authorization.
   let membership: { organization_id: string; role: string } | null = null
   const { data: ownMembership } = await supabase
     .from('organization_members')
@@ -79,9 +119,7 @@ export async function POST(request: Request) {
     }
   }
 
-  if (!membership) {
-    return NextResponse.json({ error: 'Workspace administrator access is required' }, { status: 403 })
-  }
+  if (!membership) return NextResponse.json({ error: 'Workspace administrator access is required' }, { status: 403 })
 
   try {
     const rows = await parseOperationalFile(file)
@@ -97,9 +135,6 @@ export async function POST(request: Request) {
     if (dataRows.length > 5000) throw new Error('Maximum 5,000 rows per import')
 
     const organization_id = membership.organization_id
-
-    // Use the authenticated client for normal RLS-protected writes.
-    // The authorization above guarantees that only an owner/admin reaches this point.
     const { data: existingLanes, error: lanesError } = await supabase
       .from('lanes')
       .select('id,origin,destination')
@@ -182,6 +217,7 @@ export async function POST(request: Request) {
         })
         const { error } = await supabase.from('contracts').insert(payload)
         if (error) throw new Error(error.message)
+        await refreshLaneVolumes(supabase, organization_id, true, false)
       } else {
         const payload = dataRows.map((r, i) => {
           const lane_id = laneKey.get(`${value(r, 'origin').trim().toLowerCase()}|${value(r, 'destination').trim().toLowerCase()}`)
@@ -198,6 +234,7 @@ export async function POST(request: Request) {
         })
         const { error } = await supabase.from('shipments').insert(payload)
         if (error) throw new Error(error.message)
+        await refreshLaneVolumes(supabase, organization_id, false, true)
       }
     }
 
