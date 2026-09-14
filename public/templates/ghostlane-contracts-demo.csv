@@ -1,6 +1,0 @@
-contract_id,origin,destination,carrier,contracted_volume,contract_rate,start_date,end_date
-C-1001,Chandigarh,Delhi,NorthStar Logistics,1200,42,2026-01-01,2026-12-31
-C-1002,Chandigarh,Delhi,RapidHaul,800,44,2026-01-01,2026-12-31
-C-1003,Ludhiana,Jaipur,NorthStar Logistics,900,51,2026-01-01,2026-12-31
-C-1004,Mohali,Delhi,BlueRoute Transport,700,43,2026-01-01,2026-12-31
-C-1005,Delhi,Lucknow,RapidHaul,1100,47,2026-01-01,2026-12-31
