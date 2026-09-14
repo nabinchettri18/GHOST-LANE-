@@ -5,12 +5,14 @@ export async function proxy(request: NextRequest) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 
+  const pathname = request.nextUrl.pathname
+  const isApi = pathname.startsWith('/api')
+  const isPublic = pathname === '/' || pathname === '/login' || pathname === '/signup' || pathname === '/forgot-password' || pathname.startsWith('/auth') || pathname.startsWith('/demo')
+
   // Never crash the entire site because optional auth configuration is missing.
   // Public routes remain available; protected routes will redirect to login.
   if (!url || !key) {
-    const pathname = request.nextUrl.pathname
-    const isPublic = pathname === '/' || pathname === '/login' || pathname === '/signup' || pathname.startsWith('/auth')
-    if (!isPublic) return NextResponse.redirect(new URL('/login', request.url))
+    if (!isPublic && !isApi) return NextResponse.redirect(new URL('/login', request.url))
     return NextResponse.next()
   }
 
@@ -27,13 +29,12 @@ export async function proxy(request: NextRequest) {
   })
 
   const { data: { user } } = await supabase.auth.getUser()
-  const pathname = request.nextUrl.pathname
-  const isPublic = pathname === '/' || pathname === '/login' || pathname === '/signup' || pathname.startsWith('/auth')
 
-  if (!user && !isPublic) return NextResponse.redirect(new URL('/login', request.url))
-  if (user && (pathname === '/login' || pathname === '/signup')) return NextResponse.redirect(new URL('/', request.url))
+  if (!user && !isPublic && !isApi) return NextResponse.redirect(new URL('/login', request.url))
+  if (user && (pathname === '/login' || pathname === '/signup' || pathname === '/forgot-password')) return NextResponse.redirect(new URL('/', request.url))
 
   return response
 }
 
-export const config = { matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)'] }
+export const config = { matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|csv)$).*)'] }
+

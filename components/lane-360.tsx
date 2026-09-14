@@ -18,9 +18,46 @@ export function Lane360Responsive({lane,shipments,contracts,onBack,onSim}:Props)
  const laneShipments=useMemo(()=>shipments.filter(s=>s.lane_id===lane.id),[shipments,lane.id])
  const laneContracts=useMemo(()=>contracts.filter(x=>x.lane_id===lane.id),[contracts,lane.id])
  const tabs=['Overview','Forecast','Risk','Carriers','Rates','Contracts','Shipments']
- const content=()=>{
-  if(tab==='Overview') return <div className="grid gap-4 md:grid-cols-2"><Panel title="Lane summary" icon={<Route size={17}/>}><Metric label="Origin" value={lane.origin}/><Metric label="Destination" value={lane.destination}/><Metric label="Mode" value={lane.mode||'—'}/><Metric label="Distance" value={lane.distance_km?`${fmt(Number(lane.distance_km))} km`:'—'}/></Panel><Panel title="Decision signal" icon={<BrainCircuit size={17}/>}><Signal label="Utilization" value={pct(utilization)}/><Signal label="Ghost exposure" value={fmt(ghost)}/><Signal label="Risk" value={pct(risk)}/><p className="mt-4 rounded-xl bg-[#f6f8fb] p-3 text-[11px] leading-5 text-[#66758a]">{risk>=70||utilization<65?'Consider a hybrid or lower commitment strategy.':'Current commitment is broadly aligned with realized movement.'}</p></Panel></div>
-  if(tab==='Forecast') return <div className="grid gap-4 md:grid-cols-2"><Panel title="Movement baseline" icon={<Gauge size={17}/>}><div className="text-3xl font-black">{fmt(m)}</div><p className="mt-1 text-[10px] text-[#8994a3]">Realized units on this lane</p><div className="mt-6 flex h-32 items-end gap-2">{[.55,.68,.48,.74,.62,.81,.72,.9].map((v,i)=><div key={i} className="flex-1 rounded-t-md bg-[#1769e0]/20" style={{height:`${v*100}%`}}/></div></Panel><Panel title="Forecast interpretation"><p className="text-xs leading-6 text-[#526174]">The forecast view uses the movement baseline available for this lane. More shipment history increases evidence quality; GhostLane avoids presenting unsupported precision.</p><div className="mt-5 rounded-xl border border-[#dbe2ec] p-4"><div className="text-[9px] font-black uppercase tracking-wide text-[#8994a3]">Planning range</div><div className="mt-2 text-sm font-extrabold">{fmt(Math.round(m*.9))} – {fmt(Math.round(m*1.1))} units</div></div></Panel></div>
+  const procurementDecision = risk >= 70 
+    ? { type: 'Spot Exposure / Renegotiate', color: 'text-red-700 bg-red-50 border-red-200', badge: 'HIGH RISK ACTION', reason: 'Historical movement is critically below contracted volume. Transition to spot market or dynamic tiers to avoid paying for phantom capacity.' }
+    : risk >= 45 
+    ? { type: 'Flexible / Tiered Commitment', color: 'text-amber-700 bg-amber-50 border-amber-200', badge: 'MEDIUM RISK ACTION', reason: 'Volume fluctuates across months. Structure a 60% baseline contract with indexed spot spillover to mitigate utilization drop.' }
+    : { type: 'Standard Long-Term Contract', color: 'text-emerald-700 bg-emerald-50 border-emerald-200', badge: 'HEALTHY LANE', reason: 'High realization rate and consistent carrier execution. Lock in annual committed volume for maximum freight discount.' }
+
+  const content=()=>{
+   if(tab==='Overview') return <div className="space-y-4">
+     {risk >= 70 && <div className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 p-4 text-xs">
+       <CircleAlert className="mt-0.5 shrink-0 text-red-600" size={18} />
+       <div>
+         <strong className="font-extrabold text-red-900">EARLY WARNING: Ghost Risk Rising ({pct(risk)})</strong>
+         <p className="mt-1 text-red-800 leading-5">Low utilization gap of {fmt(ghost)} units detected. Lane shows significant demand decline and volume variance. Recommended action: Renegotiate commitment or adjust to spot capacity before contract lock-in.</p>
+       </div>
+     </div>}
+     <div className="grid gap-4 md:grid-cols-2">
+       <Panel title="Lane summary" icon={<Route size={17}/>}>
+         <Metric label="Origin" value={lane.origin}/>
+         <Metric label="Destination" value={lane.destination}/>
+         <Metric label="Mode" value={lane.mode||'—'}/>
+         <Metric label="Distance" value={lane.distance_km?`${fmt(Number(lane.distance_km))} km`:'—'}/>
+       </Panel>
+       <Panel title="AI Procurement Decision" icon={<BrainCircuit size={17}/>}>
+         <div className="flex items-center justify-between">
+           <span className="text-[10px] font-black uppercase tracking-wider text-[#8490a0]">Recommended Contract</span>
+           <span className={`rounded-md px-2 py-0.5 text-[9px] font-black uppercase ${procurementDecision.color}`}>{procurementDecision.badge}</span>
+         </div>
+         <div className="mt-2 text-base font-black text-[#0f172a]">{procurementDecision.type}</div>
+         <div className="mt-3 rounded-xl bg-[#f6f8fb] p-3 text-[11px] leading-5 text-[#526174]">
+           <strong className="block text-[10px] font-extrabold uppercase text-[#718096] mb-1">Reason WHY:</strong>
+           {procurementDecision.reason}
+         </div>
+         <div className="mt-3 pt-3 border-t border-[#edf0f5] flex items-center justify-between text-xs">
+           <span className="text-[#8490a0]">Risk Classification:</span>
+           <span className="font-extrabold">{risk >= 70 ? 'High Risk ■' : risk >= 45 ? 'Medium Risk ■' : 'Low Risk ■'}</span>
+         </div>
+       </Panel>
+     </div>
+   </div>
+  if(tab==='Forecast') return <div className="grid gap-4 md:grid-cols-2"><Panel title="Movement baseline" icon={<Gauge size={17}/>}><div className="text-3xl font-black">{fmt(m)}</div><p className="mt-1 text-[10px] text-[#8994a3]">Realized units on this lane</p><div className="mt-6 flex h-32 items-end gap-2">{[.55,.68,.48,.74,.62,.81,.72,.9].map((v,i)=><div key={i} className="flex-1 rounded-t-md bg-[#1769e0]/20" style={{height:`${v*100}%`}}/>)}</div></Panel><Panel title="Forecast interpretation"><p className="text-xs leading-6 text-[#526174]">The forecast view uses the movement baseline available for this lane. More shipment history increases evidence quality; GhostLane avoids presenting unsupported precision.</p><div className="mt-5 rounded-xl border border-[#dbe2ec] p-4"><div className="text-[9px] font-black uppercase tracking-wide text-[#8994a3]">Planning range</div><div className="mt-2 text-sm font-extrabold">{fmt(Math.round(m*.9))} – {fmt(Math.round(m*1.1))} units</div></div></Panel></div>
   if(tab==='Risk') return <div className="grid gap-4 md:grid-cols-2"><Panel title="Ghost risk" icon={<CircleAlert size={17}/>}><div className="text-5xl font-black">{pct(risk)}</div><div className="mt-4 h-2 rounded-full bg-[#edf0f5]"><div className="h-full rounded-full bg-[#1769e0]" style={{width:`${risk}%`}}/></div><div className="mt-3 text-xs font-bold">{risk>=70?'High':risk>=45?'Medium':'Low'} risk</div></Panel><Panel title="Risk drivers"><div className="space-y-3"><Driver title="Utilization gap" value={pct(utilization)} detail={`${fmt(ghost)} unrealized units`}/><Driver title="Shipment evidence" value={String(laneShipments.length)} detail="linked shipment records"/><Driver title="Contract evidence" value={String(laneContracts.length)} detail="linked contract records"/></div></Panel></div>
   if(tab==='Carriers') return <Panel title="Lane carriers" icon={<Truck size={17}/>}><div className="rounded-xl border border-[#dbe2ec] p-4"><div className="text-sm font-extrabold">{lane.carrier||'Carrier not assigned'}</div><div className="mt-1 text-[10px] text-[#8994a3]">Primary carrier recorded for this lane</div></div>{laneShipments.length>0&&<div className="mt-3 text-[10px] text-[#8994a3]">{new Set(laneShipments.map(s=>s.carrier).filter(Boolean)).size} carrier name(s) appear in shipment history.</div>}</Panel>
   if(tab==='Rates') return <Panel title="Contract rates" icon={<FileText size={17}/>}><div className="space-y-2">{laneContracts.length?laneContracts.map(x=><div key={x.contract_id} className="flex items-center justify-between rounded-xl border border-[#edf0f5] p-4"><div><div className="text-xs font-extrabold">{x.contract_id}</div><div className="mt-1 text-[10px] text-[#8994a3]">{x.carrier}</div></div><div className="text-right"><div className="text-sm font-black">₹{fmt(Number(x.contract_rate||0))}</div><div className="text-[9px] text-[#8994a3]">contract rate</div></div></div>):<Empty text="No contract rates are linked to this lane."/>}</div></Panel>

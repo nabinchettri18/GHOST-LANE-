@@ -20,8 +20,9 @@ const pageNames:Record<string,string>={'/':'Overview','/import':'Data ingestion'
 const viewNames:Record<string,string>={lanes:'Lane Intelligence',forecasts:'Forecasts',risk:'Ghost Risk',recommendations:'Recommendations',rfqs:'RFQs',carriers:'Carrier intelligence',contracts:'Contracts',shipments:'Shipment execution',exceptions:'Exceptions',spend:'Freight spend','ghost-cost':'Ghost cost',savings:'Savings',copilot:'Ask GhostLane',reports:'Reports'}
 
 export function AppShell({children}:{children:React.ReactNode}){
- const pathname=usePathname();const router=useRouter();const[open,setOpen]=useState(false);const[expanded,setExpanded]=useState<string[]>(groups.map(g=>g.label));const[profileOpen,setProfileOpen]=useState(false);const[searchOpen,setSearchOpen]=useState(false);const[loggingOut,setLoggingOut]=useState(false)
- const view=typeof window!=='undefined'?new URLSearchParams(window.location.search).get('view'):null;const page=view?(viewNames[view]||'Workspace'):(pageNames[pathname]||'Overview')
+ const pathname=usePathname();const router=useRouter();const[open,setOpen]=useState(false);const[expanded,setExpanded]=useState<string[]>(groups.map(g=>g.label));const[profileOpen,setProfileOpen]=useState(false);const[searchOpen,setSearchOpen]=useState(false);const[loggingOut,setLoggingOut]=useState(false);const[mounted,setMounted]=useState(false)
+ useEffect(()=>{setMounted(true)},[])
+ const view=mounted&&typeof window!=='undefined'?new URLSearchParams(window.location.search).get('view'):null;const page=view?(viewNames[view]||'Workspace'):(pageNames[pathname]||'Overview')
  useEffect(()=>{setOpen(false);setProfileOpen(false)},[pathname])
  useEffect(()=>{const f=(e:KeyboardEvent)=>{if(e.key==='Escape'){setOpen(false);setProfileOpen(false);setSearchOpen(false)}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();setSearchOpen(true)}};addEventListener('keydown',f);return()=>removeEventListener('keydown',f)},[])
  const logout=async()=>{if(loggingOut)return;setLoggingOut(true);await createClient().auth.signOut();router.replace('/login');router.refresh()}

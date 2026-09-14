@@ -9,8 +9,8 @@ async function workspace(request: Request) {
   if (!user) return null
   if (!allowRequest(`shipment:${user.id}`, 60, 60_000)) throw new Error('RATE_LIMIT')
   const { data: membership } = await supabase.from('organization_members').select('organization_id,role').eq('user_id', user.id).order('created_at', { ascending: true }).limit(1).maybeSingle()
-  if (!membership || !['owner','admin','member'].includes(String(membership.role).toLowerCase())) return null
-  return { user, organizationId: membership.organization_id }
+  if (!membership || !['owner','admin','member','manager','operator'].includes(String(membership.role).toLowerCase())) return null
+  return { user, organizationId: membership.organization_id, supabase }
 }
 
 export async function GET(request: Request, { params }: { params: Promise<{ shipmentId: string }> }) {
@@ -18,7 +18,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ ship
   try {
     const ctx = await workspace(request); if (!ctx) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     const { shipmentId } = await params
-    const db = createAdminClient()
+    const hasServiceKey = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY)
+    const db = hasServiceKey ? createAdminClient() : ctx.supabase
     const { data, error } = await db.from('shipments').select('shipment_id,lane_id,carrier,shipment_date,volume,status,expected_cost,actual_cost,expected_transit_hours,actual_transit_hours,eta_date,delivered_at,exception_type,risk_score,notes,lanes(origin,destination,mode,distance_km)').eq('organization_id', ctx.organizationId).eq('shipment_id', shipmentId).maybeSingle()
     if (error) throw error
     if (!data) return NextResponse.json({ error: 'Shipment not found' }, { status: 404 })
@@ -39,7 +40,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ sh
     if (patch.risk_score !== undefined) { const score = Number(patch.risk_score); if (!Number.isFinite(score) || score < 0 || score > 100) return NextResponse.json({ error: 'Risk score must be between 0 and 100' }, { status: 422 }); patch.risk_score = score }
     if (patch.status === 'delivered' && patch.delivered_at === undefined) patch.delivered_at = new Date().toISOString()
     if (!Object.keys(patch).length) return NextResponse.json({ error: 'No supported fields supplied' }, { status: 400 })
-    const db = createAdminClient()
+    const hasServiceKey = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY)
+    const db = hasServiceKey ? createAdminClient() : ctx.supabase
     const { data, error } = await db.from('shipments').update(patch).eq('organization_id', ctx.organizationId).eq('shipment_id', shipmentId).select('shipment_id,status,actual_cost,actual_transit_hours,eta_date,delivered_at,exception_type,risk_score,notes').maybeSingle()
     if (error) throw error
     if (!data) return NextResponse.json({ error: 'Shipment not found' }, { status: 404 })

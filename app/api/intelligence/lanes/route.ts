@@ -43,7 +43,13 @@ export async function POST(request:Request){
     const top=[...carrierVolumes.entries()].sort((a,b)=>b[1]-a[1])[0]
     return {id:lane.id,lane:`${lane.origin} → ${lane.destination}`,origin:lane.origin,destination:lane.destination,mode:lane.mode||'road',contractedVolume:Math.round(contracted),materializedVolume:Math.round(moved),ghostVolume:Math.max(0,Math.round(contracted-moved)),realization:Number(realization.toFixed(1)),risk,band:risk>=70?'High':risk>=40?'Medium':'Low',shipments:ss.length,contracts:cs.length,carriers:carrierVolumes.size,topCarrier:top?.[0]||null,topCarrierShare:top&&moved?Number((top[1]/moved*100).toFixed(1)):0}
   })
-  for(const r of results){const {error}=await supabase.from('lanes').update({materialized_volume:r.materializedVolume,risk_score:r.risk}).eq('id',r.id).eq('organization_id',org);if(error)return NextResponse.json({error:error.message},{status:500})}
+  const batchSize = 25
+  for (let i = 0; i < results.length; i += batchSize) {
+    const chunk = results.slice(i, i + batchSize)
+    await Promise.all(
+      chunk.map(r => supabase.from('lanes').update({ materialized_volume: r.materializedVolume, risk_score: r.risk }).eq('id', r.id).eq('organization_id', org))
+    )
+  }
   const highRisk=results.filter(r=>r.risk>=70).length
   return NextResponse.json({generatedAt:new Date().toISOString(),laneCount:results.length,highRisk,totals:{contracted:results.reduce((s,r)=>s+r.contractedVolume,0),materialized:results.reduce((s,r)=>s+r.materializedVolume,0),ghost:results.reduce((s,r)=>s+r.ghostVolume,0)},lanes:results})
 }

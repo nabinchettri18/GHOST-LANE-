@@ -19,7 +19,8 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return <LandingPage />
 
-  const db = createAdminClient()
+  const hasServiceKey = Boolean(process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY)
+  const db = hasServiceKey ? createAdminClient() : supabase
   const [membershipResult, profileResult] = await Promise.all([
     db.from('organization_members').select('organization_id,role,created_at').eq('user_id', user.id).order('created_at', { ascending: true }),
     db.from('profiles').select('full_name,company_name,role,default_organization_id').eq('id', user.id).maybeSingle(),
@@ -36,17 +37,18 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
   const params = await searchParams
   const view = params.view || 'overview'
 
-  const needsLanes = ['overview', 'lanes', 'forecasts', 'risk', 'recommendations', 'carriers', 'contracts', 'shipments', 'exceptions', 'spend', 'ghost-cost', 'savings', 'copilot'].includes(view)
-  const needsShipments = ['overview', 'shipments', 'exceptions', 'copilot'].includes(view)
-  const needsContracts = view === 'contracts'
-  const needsCarriers = view === 'carriers'
-
   const [lanesResult, shipmentsResult, contractsResult, carriersResult] = await Promise.all([
-    needsLanes ? db.from('lanes').select(laneSelect).eq('organization_id', organizationId).order('risk_score', { ascending: false }).limit(view === 'overview' ? 120 : 300) : Promise.resolve({ data: [], error: null }),
-    needsShipments ? db.from('shipments').select(shipmentSelect).eq('organization_id', organizationId).order('shipment_date', { ascending: false }).limit(view === 'overview' ? 60 : 250) : Promise.resolve({ data: [], error: null }),
-    needsContracts ? db.from('contracts').select(contractSelect).eq('organization_id', organizationId).order('start_date', { ascending: false }).limit(250) : Promise.resolve({ data: [], error: null }),
-    needsCarriers ? db.from('carriers').select(carrierSelect).eq('organization_id', organizationId).order('name').limit(100) : Promise.resolve({ data: [], error: null }),
+    db.from('lanes').select(laneSelect).eq('organization_id', organizationId).order('risk_score', { ascending: false }).limit(500),
+    db.from('shipments').select(shipmentSelect).eq('organization_id', organizationId).order('shipment_date', { ascending: false }).limit(500),
+    db.from('contracts').select(contractSelect).eq('organization_id', organizationId).order('contracted_volume', { ascending: false }).limit(250),
+    db.from('carriers').select(carrierSelect).eq('organization_id', organizationId).order('name').limit(150),
   ])
 
-  return <AppShell><GhostLaneWorkspace view={view} lanes={(lanesResult.data ?? []) as any} shipments={(shipmentsResult.data ?? []) as any} contracts={(contractsResult.data ?? []) as any} carriers={(carriersResult.data ?? []) as any} company={profileResult.data?.company_name || undefined} /></AppShell>
+  let carriers = (carriersResult.data ?? []) as any
+  if (!carriers.length) {
+    const { data: globalCarriers } = await db.from('carriers').select(carrierSelect).order('name').limit(150)
+    carriers = globalCarriers ?? []
+  }
+
+  return <AppShell><GhostLaneWorkspace view={view} lanes={(lanesResult.data ?? []) as any} shipments={(shipmentsResult.data ?? []) as any} contracts={(contractsResult.data ?? []) as any} carriers={carriers} company={profileResult.data?.company_name || undefined} /></AppShell>
 }

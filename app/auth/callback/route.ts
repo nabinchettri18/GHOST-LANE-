@@ -15,7 +15,8 @@ export async function GET(request: Request) {
   const { data: { user } } = await supabase.auth.getUser()
   if (user) {
     try {
-      const admin = createAdminClient()
+      const hasServiceKey = Boolean(process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY)
+      const admin = hasServiceKey ? createAdminClient() : supabase
       const { data: existing } = await admin
         .from('organization_members').select('organization_id').eq('user_id', user.id)
         .order('created_at', { ascending: true }).limit(1).maybeSingle()

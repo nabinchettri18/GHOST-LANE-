@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { ArrowLeft, CircleAlert, CheckCircle2, Clock3, Truck, IndianRupee } from 'lucide-react'
+import { ShipmentOptimizerClient } from '@/components/shipments/shipment-optimizer-client'
 
 export default async function ShipmentDetailPage({ params }: { params: Promise<{ shipmentId: string }> }) {
   const { shipmentId } = await params
@@ -10,7 +11,9 @@ export default async function ShipmentDetailPage({ params }: { params: Promise<{
   if (!user) notFound()
   const { data: membership } = await supabase.from('organization_members').select('organization_id').eq('user_id', user.id).order('created_at',{ascending:true}).limit(1).maybeSingle()
   if (!membership) notFound()
-  const { data: shipment } = await supabase.from('shipments').select('shipment_id,lane_id,carrier,shipment_date,volume,status,expected_cost,actual_cost,expected_transit_hours,actual_transit_hours,eta_date,delivered_at,exception_type,risk_score,notes,lanes(origin,destination,mode,distance_km)').eq('organization_id',membership.organization_id).eq('shipment_id',shipmentId).maybeSingle()
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(shipmentId)
+  const query = supabase.from('shipments').select('id,shipment_id,lane_id,carrier,shipment_date,volume,status,expected_cost,actual_cost,expected_transit_hours,actual_transit_hours,eta_date,delivered_at,exception_type,risk_score,notes,current_route,lanes(origin,destination,mode,distance_km)').eq('organization_id',membership.organization_id)
+  const { data: shipment } = isUuid ? await query.or(`id.eq.${shipmentId},shipment_id.eq.${shipmentId}`).maybeSingle() : await query.eq('shipment_id',shipmentId).maybeSingle()
   if (!shipment) notFound()
   const lane = Array.isArray(shipment.lanes) ? shipment.lanes[0] : shipment.lanes
   const risk = Number(shipment.risk_score ?? 0)
@@ -33,6 +36,18 @@ export default async function ShipmentDetailPage({ params }: { params: Promise<{
         <Card icon={<Clock3 size={16}/>} label="Actual transit" value={shipment.actual_transit_hours == null ? '—' : `${Number(shipment.actual_transit_hours)}h`} />
         <Card icon={<CircleAlert size={16}/>} label="Exception" value={shipment.exception_type || 'None recorded'} />
       </section>
+
+      <div className="mt-5">
+        <ShipmentOptimizerClient
+          shipmentId={shipment.shipment_id}
+          origin={lane?.origin || 'Origin'}
+          destination={lane?.destination || 'Destination'}
+          carrier={shipment.carrier || 'Unassigned'}
+          currentRoute={shipment.current_route}
+          currentCost={Number(shipment.actual_cost ?? shipment.expected_cost ?? 0)}
+        />
+      </div>
+
       <div className="mt-5 grid gap-5 lg:grid-cols-[1.15fr_.85fr]">
         <section className="rounded-3xl border border-[#dbe2ec] bg-white p-6">
           <h2 className="text-sm font-extrabold">Execution timeline</h2>

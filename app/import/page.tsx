@@ -155,6 +155,23 @@ export default function ImportPage() {
           </section>
 
           <aside className="space-y-5">
+            <div className="rounded-3xl border border-[#2563eb]/20 bg-blue-50/50 p-6">
+              <p className="text-[10px] font-black uppercase tracking-[.14em] text-[#2563eb]">Testing & Onboarding</p>
+              <h3 className="mt-2 text-sm font-extrabold text-[#0f172a]">Download Sample Dataset</h3>
+              <p className="mt-1 text-xs leading-5 text-[#64748b]">
+                GhostLane never injects hidden mock records. Download our verified sample freight dataset (FTL/LTL) to test import, lane aggregation, and cuOpt optimization.
+              </p>
+              <div className="mt-4 flex flex-col gap-2">
+                <a
+                  href="/demo/ghostlane-demo-shipments.csv"
+                  download="ghostlane-sample-shipments.csv"
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-white border border-[#cbd5e1] px-4 py-2.5 text-xs font-bold text-[#0f172a] shadow-sm hover:bg-slate-50"
+                >
+                  <FileUp size={14} className="text-[#2563eb]" /> Download Sample CSV
+                </a>
+              </div>
+            </div>
+
             <div className="rounded-3xl border border-[#dbe2ec] bg-white p-6"><p className="text-[10px] font-black uppercase tracking-[.14em] text-[#8490a0]">What GhostLane needs</p><div className="mt-4 space-y-4">{KINDS.map(item => <div key={item.id}><p className="text-xs font-extrabold">{item.label}</p><p className="mt-1 text-[10px] leading-4 text-[#788596]">{item.description}</p><p className="mt-1 text-[9px] font-bold text-[#1769e0]">Required: {item.required}</p></div>)}</div></div>
             <div className="rounded-3xl bg-[#08111f] p-6 text-white"><p className="text-[10px] font-black uppercase tracking-[.14em] text-[#83b4ff]">After import</p><p className="mt-4 text-lg font-black">Your data becomes the dashboard.</p><p className="mt-2 text-[11px] leading-5 text-[#aab5c3]">Lanes, shipments, contracts and carriers are linked to your workspace. GhostLane derives shipment-level ghost-lane signals from the operational variance available in the file.</p></div>
           </aside>

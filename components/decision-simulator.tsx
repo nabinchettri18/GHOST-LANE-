@@ -52,6 +52,7 @@ export function DecisionSimulator({ lanes, carriers }: Props) {
   const [routeChange, setRouteChange] = useState('current')
   const [vehicleChange, setVehicleChange] = useState('current')
   const [tab, setTab] = useState<'simulator' | 'heatmap'>('simulator')
+  const [saved, setSaved] = useState(false)
 
   const lane = lanes.find(l => l.id === laneId) || lanes[0]
   const carrier = carriers.find(c => c.name === lane?.carrier)
@@ -154,7 +155,38 @@ export function DecisionSimulator({ lanes, carriers }: Props) {
             <h2 className="mt-4 text-xl font-black">{result!.decision}</h2>
             <p className="mt-2 text-xs leading-5 text-[#66758a]">GhostLane treats the simulation as a decision aid: review the evidence before procurement and only commit when the lane's expected movement supports the capacity.</p>
             <div className="mt-5 space-y-2">{result!.changes.length ? result!.changes.map(x => <div key={x} className="flex items-start gap-2 text-[11px] font-semibold text-[#4e5d70]"><CheckCircle2 size={14} className="mt-0.5 shrink-0 text-[#22a06b]"/>{x}</div>) : <div className="text-[11px] font-semibold text-[#66758a]">Baseline scenario — no assumptions changed.</div>}</div>
-            <button className="mt-7 flex w-full items-center justify-between rounded-xl bg-[#1769e0] px-4 py-3 text-[10px] font-black text-white">Keep scenario for review <ArrowRight size={14}/></button>
+            <button
+              onClick={() => {
+                if (!result || !lane) return
+                const payload = {
+                  laneId: lane.id,
+                  lane: `${lane.origin} → ${lane.destination}`,
+                  demandChange,
+                  carrierChange,
+                  routeChange,
+                  vehicleChange,
+                  baseRisk: result.base,
+                  simulatedRisk: result.risk,
+                  decision: result.decision,
+                  savedAt: new Date().toISOString(),
+                }
+                try {
+                  const existing = JSON.parse(localStorage.getItem('ghostlane_saved_scenarios') || '[]')
+                  existing.unshift(payload)
+                  localStorage.setItem('ghostlane_saved_scenarios', JSON.stringify(existing.slice(0, 20)))
+                } catch (e) {
+                  console.warn('LocalStorage save error', e)
+                }
+                setSaved(true)
+                setTimeout(() => setSaved(false), 3000)
+              }}
+              className={`mt-7 flex w-full items-center justify-between rounded-xl px-4 py-3 text-[10px] font-black text-white transition ${
+                saved ? 'bg-[#22a06b]' : 'bg-[#1769e0] hover:bg-[#0f57bd]'
+              }`}
+            >
+              <span>{saved ? '✓ Scenario saved for procurement review' : 'Keep scenario for review'}</span>
+              <ArrowRight size={14} />
+            </button>
           </article>
         </section>
       </> : <RiskHeatmap lanes={lanes} onSelect={id => { setLaneId(id); setTab('simulator') }} />}

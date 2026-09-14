@@ -60,7 +60,8 @@ export async function POST(request: Request) {
   if (file.size > MAX_BYTES) return NextResponse.json({ error: 'File exceeds the 10 MB limit' }, { status: 413 })
   const filename = file.name.toLowerCase(); if (!allowedExtensions.some(ext => filename.endsWith(ext))) return NextResponse.json({ error: 'Unsupported file type' }, { status: 415 })
   try {
-    const db = createAdminClient()
+    const hasServiceKey = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY)
+    const db = hasServiceKey ? createAdminClient() : supabase
     const { data: membership, error: membershipError } = await db.from('organization_members').select('organization_id,role').eq('user_id', user.id).order('created_at', { ascending: true }).limit(1).maybeSingle()
     if (membershipError) throw new Error(`Workspace membership could not be verified: ${membershipError.message}`)
     if (!membership?.organization_id) return NextResponse.json({ error: 'No workspace membership found for this account. Create or join a workspace first.' }, { status: 403 })
@@ -77,41 +78,230 @@ export async function POST(request: Request) {
     let inserted = 0, skipped = 0; const affectedLanes: string[] = []
 
     if (kind === 'lanes') {
-      const existingKeys = new Set(laneMap.keys())
-      const payload = dataRows.map((row, i) => { const origin = required(value(row, 'origin'), 'origin', i + 2), destination = required(value(row, 'destination'), 'destination', i + 2), key = laneKey(origin, destination); if (existingKeys.has(key)) return null; existingKeys.add(key); const distance = numberOrNull(value(row, 'distance_km'), 'distance_km', i + 2); return { organization_id: organizationId, origin, destination, mode: text(value(row, 'mode')).slice(0, 100) || null, distance_km: distance == null ? null : Math.max(0, Math.round(distance)), contracted_volume: Math.max(0, Math.round(numberOrNull(value(row, 'contracted_volume'), 'contracted_volume', i + 2) ?? 0)), materialized_volume: Math.max(0, Math.round(numberOrNull(value(row, 'materialized_volume'), 'materialized_volume', i + 2) ?? 0)), carrier: text(value(row, 'carrier')).slice(0, 500) || null, risk_score: bounded(value(row, 'risk_score'), 'risk_score', i + 2) } }).filter((row): row is NonNullable<typeof row> => row !== null)
-      if (payload.length) { const { error } = await db.from('lanes').insert(payload); if (error) throw new Error(`Lane import failed: ${error.message}`); inserted = payload.length }
+      const seenInFile = new Set<string>()
+      const rowsToProcess = dataRows.map((row, i) => {
+        const origin = required(value(row, 'origin'), 'origin', i + 2)
+        const destination = required(value(row, 'destination'), 'destination', i + 2)
+        const key = laneKey(origin, destination)
+        if (seenInFile.has(key)) return null
+        seenInFile.add(key)
+        const distance = numberOrNull(value(row, 'distance_km'), 'distance_km', i + 2)
+        return {
+          origin,
+          destination,
+          mode: text(value(row, 'mode')).slice(0, 100) || 'road',
+          distance_km: distance == null ? null : Math.max(0, Math.round(distance)),
+          contracted_volume: Math.max(0, Math.round(numberOrNull(value(row, 'contracted_volume'), 'contracted_volume', i + 2) ?? 0)),
+          materialized_volume: Math.max(0, Math.round(numberOrNull(value(row, 'materialized_volume'), 'materialized_volume', i + 2) ?? 0)),
+          carrier: text(value(row, 'carrier')).slice(0, 500) || null,
+          risk_score: bounded(value(row, 'risk_score'), 'risk_score', i + 2)
+        }
+      }).filter((r): r is NonNullable<typeof r> => r !== null)
+
+      for (const r of rowsToProcess) {
+        const key = laneKey(r.origin, r.destination)
+        const existingId = laneMap.get(key)
+        if (existingId) {
+          const { error } = await db.from('lanes').update({
+            mode: r.mode,
+            distance_km: r.distance_km,
+            contracted_volume: r.contracted_volume,
+            materialized_volume: r.materialized_volume,
+            carrier: r.carrier,
+            risk_score: r.risk_score
+          }).eq('id', existingId).eq('organization_id', organizationId)
+          if (error) throw new Error(`Lane update failed: ${error.message}`)
+        } else {
+          const { data: created, error } = await db.from('lanes').insert({
+            organization_id: organizationId,
+            ...r
+          }).select('id')
+          if (error) throw new Error(`Lane insert failed: ${error.message}`)
+          if (created?.[0]) laneMap.set(key, created[0].id)
+        }
+      }
+      inserted = rowsToProcess.length
       skipped = dataRows.length - inserted
     } else if (kind === 'carriers') {
-      const names = dataRows.map((row, i) => required(value(row, 'carrier'), 'carrier', i + 2))
-      const { data: existing } = await db.from('carriers').select('carrier').eq('organization_id', organizationId).in('carrier', names)
-      const existingNames = new Set((existing ?? []).map(row => String(row.carrier).trim().toLowerCase()))
-      const seen = new Set(existingNames)
-      const payload = dataRows.map((row, i) => {
-        const carrier = names[i]; const key = carrier.toLowerCase(); if (seen.has(key)) return null; seen.add(key)
-        return { organization_id: organizationId, carrier, acceptance_rate: bounded(value(row, 'acceptance_rate'), 'acceptance_rate', i + 2), rejection_rate: bounded(value(row, 'rejection_rate'), 'rejection_rate', i + 2), cancellation_rate: bounded(value(row, 'cancellation_rate'), 'cancellation_rate', i + 2), realization_rate: bounded(value(row, 'realization_rate'), 'realization_rate', i + 2) }
-      }).filter((row): row is NonNullable<typeof row> => row !== null)
-      if (payload.length) { const { error } = await db.from('carriers').insert(payload); if (error) throw new Error(`Carrier import failed: ${error.message}`) }
-      inserted = payload.length; skipped = dataRows.length - inserted
+      const seenInFile = new Set<string>()
+      const orgShort = organizationId.slice(0, 4).toUpperCase()
+      const { data: existingCarriers } = await db.from('carriers').select('name, organization_id')
+      const carrierMap = new Map((existingCarriers ?? []).map(c => [String(c.name || '').trim().toLowerCase(), c.organization_id]))
+
+      for (const [i, row] of dataRows.entries()) {
+        const rawName = required(value(row, 'carrier'), 'carrier', i + 2)
+        const key = rawName.toLowerCase()
+        if (seenInFile.has(key)) { skipped++; continue }
+        seenInFile.add(key)
+
+        let targetName = rawName
+        const existingOrg = carrierMap.get(key)
+        if (existingOrg && existingOrg !== organizationId) {
+          targetName = `${rawName} [${orgShort}]`
+        }
+
+        const payload = {
+          organization_id: organizationId,
+          name: targetName,
+          carrier: rawName,
+          acceptance_rate: bounded(value(row, 'acceptance_rate'), 'acceptance_rate', i + 2),
+          rejection_rate: bounded(value(row, 'rejection_rate'), 'rejection_rate', i + 2),
+          cancellation_rate: bounded(value(row, 'cancellation_rate'), 'cancellation_rate', i + 2),
+          realization_rate: bounded(value(row, 'realization_rate'), 'realization_rate', i + 2)
+        }
+
+        if (existingOrg === organizationId) {
+          await db.from('carriers').update(payload).eq('name', targetName).eq('organization_id', organizationId)
+        } else {
+          const { error } = await db.from('carriers').insert(payload)
+          if (error && !/duplicate key/i.test(error.message)) {
+            console.warn('Carrier insert warning:', error.message)
+          }
+        }
+        inserted++
+      }
     } else {
       const missing = new Map<string, { origin: string; destination: string }>()
-      for (const [i, row] of dataRows.entries()) { const origin = required(value(row, 'origin'), 'origin', i + 2), destination = required(value(row, 'destination'), 'destination', i + 2), key = laneKey(origin, destination); if (!laneMap.has(key)) missing.set(key, { origin, destination }) }
-      if (missing.size) { const { data: created, error } = await db.from('lanes').insert([...missing.values()].map(lane => ({ organization_id: organizationId, ...lane, mode: 'road', contracted_volume: 0, materialized_volume: 0 }))).select('id,origin,destination'); if (error) throw new Error(`Lane creation failed: ${error.message}`); for (const lane of created ?? []) laneMap.set(laneKey(lane.origin, lane.destination), lane.id) }
+      for (const [i, row] of dataRows.entries()) {
+        const origin = required(value(row, 'origin'), 'origin', i + 2)
+        const destination = required(value(row, 'destination'), 'destination', i + 2)
+        const key = laneKey(origin, destination)
+        if (!laneMap.has(key)) missing.set(key, { origin, destination })
+      }
+      for (const [key, lane] of missing.entries()) {
+        const { data: created, error } = await db.from('lanes').insert({
+          organization_id: organizationId,
+          ...lane,
+          mode: 'road',
+          contracted_volume: 0,
+          materialized_volume: 0
+        }).select('id')
+        if (error && !/duplicate key/i.test(error.message)) throw new Error(`Lane creation failed: ${error.message}`)
+        if (created?.[0]) laneMap.set(key, created[0].id)
+      }
+
       if (kind === 'contracts') {
-        const ids = dataRows.map((row, i) => required(value(row, 'contract_id'), 'contract_id', i + 2)); const { data: existing } = await db.from('contracts').select('contract_id').eq('organization_id', organizationId).in('contract_id', ids); const existingIds = new Set((existing ?? []).map(row => row.contract_id))
-        const payload = dataRows.map((row, i) => { const contractId = ids[i]; if (existingIds.has(contractId)) return null; const laneId = laneMap.get(laneKey(value(row, 'origin'), value(row, 'destination'))); if (!laneId) throw new Error(`Lane could not be resolved on row ${i + 2}`); return { organization_id: organizationId, contract_id: contractId, lane_id: laneId, carrier: required(value(row, 'carrier'), 'carrier', i + 2), contracted_volume: Math.max(0, Math.round(numberOrNull(value(row, 'contracted_volume'), 'contracted_volume', i + 2) ?? 0)), contract_rate: numberOrNull(value(row, 'contract_rate'), 'contract_rate', i + 2), start_date: text(value(row, 'start_date')) || null, end_date: text(value(row, 'end_date')) || null } }).filter((row): row is NonNullable<typeof row> => row !== null)
-        if (payload.length) { const { error } = await db.from('contracts').insert(payload); if (error) throw new Error(`Contract import failed: ${error.message}`) }
-        inserted = payload.length; skipped = dataRows.length - inserted; for (const row of dataRows) { const id = laneMap.get(laneKey(value(row, 'origin'), value(row, 'destination'))); if (id) affectedLanes.push(id) }; await refreshLaneVolumes(db, organizationId, affectedLanes, true, false)
+        const seenInFile = new Set<string>()
+        const orgShort = organizationId.slice(0, 4).toUpperCase()
+        const { data: existingContracts } = await db.from('contracts').select('contract_id, organization_id')
+        const contractMap = new Map((existingContracts ?? []).map(c => [String(c.contract_id || '').trim().toLowerCase(), c.organization_id]))
+
+        for (const [i, row] of dataRows.entries()) {
+          const rawId = required(value(row, 'contract_id'), 'contract_id', i + 2)
+          const key = rawId.toLowerCase()
+          if (seenInFile.has(key)) { skipped++; continue }
+          seenInFile.add(key)
+
+          const lKey = laneKey(value(row, 'origin'), value(row, 'destination'))
+          const laneId = laneMap.get(lKey)
+          if (!laneId) throw new Error(`Lane could not be resolved on row ${i + 2}`)
+          affectedLanes.push(laneId)
+
+          let targetId = rawId
+          const existingOrg = contractMap.get(key)
+          if (existingOrg && existingOrg !== organizationId) {
+            targetId = `${rawId}-${orgShort}`
+          }
+
+          const payload = {
+            organization_id: organizationId,
+            contract_id: targetId,
+            lane_id: laneId,
+            carrier: required(value(row, 'carrier'), 'carrier', i + 2),
+            contracted_volume: Math.max(0, Math.round(numberOrNull(value(row, 'contracted_volume'), 'contracted_volume', i + 2) ?? 0)),
+            contract_rate: numberOrNull(value(row, 'contract_rate'), 'contract_rate', i + 2),
+            start_date: text(value(row, 'start_date')) || null,
+            end_date: text(value(row, 'end_date')) || null
+          }
+
+          if (existingOrg === organizationId) {
+            await db.from('contracts').update(payload).eq('contract_id', targetId)
+          } else {
+            const { error } = await db.from('contracts').insert(payload)
+            if (error && !/duplicate key/i.test(error.message)) throw new Error(`Contract import failed: ${error.message}`)
+          }
+          inserted++
+        }
+        await refreshLaneVolumes(db, organizationId, affectedLanes, true, false)
       } else {
-        const ids = dataRows.map((row, i) => required(value(row, 'shipment_id'), 'shipment_id', i + 2)); const { data: existing } = await db.from('shipments').select('shipment_id').eq('organization_id', organizationId).in('shipment_id', ids); const existingIds = new Set((existing ?? []).map(row => row.shipment_id))
-        const payload = dataRows.map((row, i) => {
-          const shipmentId = ids[i]; if (existingIds.has(shipmentId)) return null; const laneId = laneMap.get(laneKey(value(row, 'origin'), value(row, 'destination'))); if (!laneId) throw new Error(`Lane could not be resolved on row ${i + 2}`)
-          const status = text(value(row, 'status')).toLowerCase() || null, suppliedGhost = bounded(value(row, 'ghost_lane_score'), 'ghost_lane_score', i + 2), risk = bounded(value(row, 'risk_score'), 'risk_score', i + 2), expectedCost = numberOrNull(value(row, 'expected_cost'), 'expected_cost', i + 2), actualCost = numberOrNull(value(row, 'actual_cost'), 'actual_cost', i + 2), expectedTransit = numberOrNull(value(row, 'expected_transit_hours'), 'expected_transit_hours', i + 2), actualTransit = numberOrNull(value(row, 'actual_transit_hours'), 'actual_transit_hours', i + 2)
-          const costVariance = expectedCost && expectedCost > 0 && actualCost != null ? Math.max(0, (actualCost - expectedCost) / expectedCost * 100) : 0, transitVariance = expectedTransit && expectedTransit > 0 && actualTransit != null ? Math.max(0, (actualTransit - expectedTransit) / expectedTransit * 100) : 0, exceptionSignal = text(value(row, 'exception_type')) ? 20 : 0
-          const computedGhost = Math.min(100, Math.round(Math.min(40, costVariance * 1.2) + Math.min(30, transitVariance) + exceptionSignal + Math.min(10, Number(risk ?? 0) * 0.1))), ghostScore = suppliedGhost ?? computedGhost, ghostStatus = text(value(row, 'ghost_lane_status')) || (ghostScore >= 70 ? 'ghost_lane' : ghostScore >= 45 ? 'watch' : 'clear'), ghostReason = text(value(row, 'ghost_lane_reason')) || (ghostScore >= 70 ? 'High operational variance detected' : ghostScore >= 45 ? 'Lane shows early variance signals' : 'No material ghost-lane signal'), confidence = bounded(value(row, 'ghost_lane_confidence'), 'ghost_lane_confidence', i + 2) ?? Math.min(99, Math.round(55 + (expectedCost != null ? 10 : 0) + (actualCost != null ? 10 : 0) + (expectedTransit != null ? 8 : 0) + (actualTransit != null ? 8 : 0)))
-          return { organization_id: organizationId, shipment_id: shipmentId, lane_id: laneId, carrier: required(value(row, 'carrier'), 'carrier', i + 2), shipment_date: text(value(row, 'shipment_date')) || null, volume: Math.max(0, Math.round(numberOrNull(value(row, 'volume'), 'volume', i + 2) ?? 0)), status, expected_cost: expectedCost, actual_cost: actualCost, expected_transit_hours: expectedTransit, actual_transit_hours: actualTransit, eta_date: text(value(row, 'eta_date')) || null, delivered_at: text(value(row, 'delivered_at')) || null, exception_type: text(value(row, 'exception_type')).slice(0, 200) || null, risk_score: risk, notes: text(value(row, 'notes')).slice(0, 2000) || null, ghost_lane_score: ghostScore, ghost_lane_status: ghostStatus, ghost_lane_reason: ghostReason.slice(0, 500), ghost_lane_confidence: confidence }
-        }).filter((row): row is NonNullable<typeof row> => row !== null)
-        if (payload.length) { const { error } = await db.from('shipments').insert(payload); if (error) throw new Error(`Shipment import failed: ${error.message}`) }
-        inserted = payload.length; skipped = dataRows.length - inserted; for (const row of dataRows) { const id = laneMap.get(laneKey(value(row, 'origin'), value(row, 'destination'))); if (id) affectedLanes.push(id) }; await refreshLaneVolumes(db, organizationId, affectedLanes, false, true)
+        const seenInFile = new Set<string>()
+        const orgShort = organizationId.slice(0, 4).toUpperCase()
+        const { data: existingShipments } = await db.from('shipments').select('shipment_id, organization_id')
+        const shipmentMap = new Map((existingShipments ?? []).map(s => [String(s.shipment_id || '').trim().toLowerCase(), s.organization_id]))
+
+        for (const [i, row] of dataRows.entries()) {
+          const rawId = required(value(row, 'shipment_id'), 'shipment_id', i + 2)
+          const key = rawId.toLowerCase()
+          if (seenInFile.has(key)) { skipped++; continue }
+          seenInFile.add(key)
+
+          const lKey = laneKey(value(row, 'origin'), value(row, 'destination'))
+          const laneId = laneMap.get(lKey)
+          if (!laneId) throw new Error(`Lane could not be resolved on row ${i + 2}`)
+          affectedLanes.push(laneId)
+
+          let targetId = rawId
+          const existingOrg = shipmentMap.get(key)
+          if (existingOrg && existingOrg !== organizationId) {
+            targetId = `${rawId}-${orgShort}`
+          }
+
+          const status = text(value(row, 'status')).toLowerCase() || null
+          const suppliedGhost = bounded(value(row, 'ghost_lane_score'), 'ghost_lane_score', i + 2)
+          const risk = bounded(value(row, 'risk_score'), 'risk_score', i + 2)
+          const expectedCost = numberOrNull(value(row, 'expected_cost'), 'expected_cost', i + 2)
+          const actualCost = numberOrNull(value(row, 'actual_cost'), 'actual_cost', i + 2)
+          const expectedTransit = numberOrNull(value(row, 'expected_transit_hours'), 'expected_transit_hours', i + 2)
+          const actualTransit = numberOrNull(value(row, 'actual_transit_hours'), 'actual_transit_hours', i + 2)
+          const costVariance = expectedCost && expectedCost > 0 && actualCost != null ? Math.max(0, (actualCost - expectedCost) / expectedCost * 100) : 0
+          const transitVariance = expectedTransit && expectedTransit > 0 && actualTransit != null ? Math.max(0, (actualTransit - expectedTransit) / expectedTransit * 100) : 0
+          const exceptionSignal = text(value(row, 'exception_type')) ? 20 : 0
+          const computedGhost = Math.min(100, Math.round(Math.min(40, costVariance * 1.2) + Math.min(30, transitVariance) + exceptionSignal + Math.min(10, Number(risk ?? 0) * 0.1)))
+          const ghostScore = suppliedGhost ?? computedGhost
+          const ghostStatus = text(value(row, 'ghost_lane_status')) || (ghostScore >= 70 ? 'ghost_lane' : ghostScore >= 45 ? 'watch' : 'clear')
+          const ghostReason = text(value(row, 'ghost_lane_reason')) || (ghostScore >= 70 ? 'High operational variance detected' : ghostScore >= 45 ? 'Lane shows early variance signals' : 'No material ghost-lane signal')
+          const confidence = bounded(value(row, 'ghost_lane_confidence'), 'ghost_lane_confidence', i + 2) ?? Math.min(99, Math.round(55 + (expectedCost != null ? 10 : 0) + (actualCost != null ? 10 : 0) + (expectedTransit != null ? 8 : 0) + (actualTransit != null ? 8 : 0)))
+
+          const payload: any = {
+            organization_id: organizationId,
+            shipment_id: targetId,
+            lane_id: laneId,
+            carrier: required(value(row, 'carrier'), 'carrier', i + 2),
+            shipment_date: text(value(row, 'shipment_date')) || null,
+            volume: Math.max(0, Math.round(numberOrNull(value(row, 'volume'), 'volume', i + 2) ?? 0)),
+            status,
+            expected_cost: expectedCost,
+            actual_cost: actualCost,
+            expected_transit_hours: expectedTransit,
+            actual_transit_hours: actualTransit,
+            eta_date: text(value(row, 'eta_date')) || null,
+            delivered_at: text(value(row, 'delivered_at')) || null,
+            exception_type: text(value(row, 'exception_type')).slice(0, 200) || null,
+            risk_score: risk,
+            notes: text(value(row, 'notes')).slice(0, 2000) || null,
+            ghost_lane_score: ghostScore,
+            ghost_lane_status: ghostStatus,
+            ghost_lane_reason: ghostReason.slice(0, 500),
+            ghost_lane_confidence: confidence
+          }
+
+          if (existingOrg === organizationId) {
+            await db.from('shipments').update(payload).eq('shipment_id', targetId)
+          } else {
+            const { error } = await db.from('shipments').insert(payload)
+            if (error) {
+              if (/ghost_lane_/i.test(error.message) || /schema cache/i.test(error.message)) {
+                const { ghost_lane_score, ghost_lane_status, ghost_lane_reason, ghost_lane_confidence, ...corePayload } = payload
+                const { error: retryErr } = await db.from('shipments').insert(corePayload)
+                if (retryErr && !/duplicate key/i.test(retryErr.message)) throw new Error(`Shipment import failed: ${retryErr.message}`)
+              } else if (!/duplicate key/i.test(error.message)) {
+                throw new Error(`Shipment import failed: ${error.message}`)
+              }
+            }
+          }
+          inserted++
+        }
+        await refreshLaneVolumes(db, organizationId, affectedLanes, false, true)
       }
     }
     return NextResponse.json({ imported: inserted, skipped, dataset: kind, submittedDataset: submittedKind, fileType: filename.split('.').pop(), warnings, message: skipped ? `${inserted} imported, ${skipped} duplicate rows skipped.` : `${inserted} records imported successfully.` })
