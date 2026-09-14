@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { AppShell } from '@/components/app-shell'
@@ -11,5 +12,5 @@ export default async function OperationsPage(){
   supabase.from('shipment_events').select('id,shipment_id,event_type,severity,message,created_at').order('created_at',{ascending:false}).limit(500),
   supabase.from('shipment_help_requests').select('id,shipment_id,status,reason,latitude,longitude,relief_shipment_id,created_at').order('created_at',{ascending:false}).limit(200)
  ])
- return <AppShell><LiveOperations shipments={(shipments??[]) as any} lanes={(lanes??[]) as any} events={(events??[]) as any} help={(help??[]) as any}/></AppShell>
+ return <AppShell><div><div className="flex justify-end border-b border-[#edf0f5] bg-white px-4 py-3 sm:px-6 lg:px-8"><Link href="/operations/optimizer" className="inline-flex items-center gap-2 rounded-xl bg-[#08111f] px-4 py-2.5 text-[10px] font-black text-white">NVIDIA cuOpt Route Optimizer</Link></div><LiveOperations shipments={(shipments??[]) as any} lanes={(lanes??[]) as any} events={(events??[]) as any} help={(help??[]) as any}/></div></AppShell>
 }
