@@ -48,7 +48,8 @@ export async function POST(request: Request) {
   if (file.size > MAX_BYTES) return NextResponse.json({ error: 'File exceeds the 10 MB limit' }, { status: 413 })
   const filename = file.name.toLowerCase(); if (!allowedExtensions.some(ext => filename.endsWith(ext))) return NextResponse.json({ error: 'Unsupported file type' }, { status: 415 })
   try {
-    const { data: membership, error: membershipError } = await supabase.from('organization_members').select('organization_id,role').eq('user_id', user.id).order('created_at', { ascending: true }).limit(1).maybeSingle()
+    const db = createAdminClient()
+    const { data: membership, error: membershipError } = await db.from('organization_members').select('organization_id,role').eq('user_id', user.id).order('created_at', { ascending: true }).limit(1).maybeSingle()
     if (membershipError) throw new Error(`Workspace membership could not be verified: ${membershipError.message}`)
     if (!membership?.organization_id) return NextResponse.json({ error: 'No workspace membership found for this account. Create or join a workspace first.' }, { status: 403 })
     const rows = await parseOperationalFile(file)
@@ -57,7 +58,7 @@ export async function POST(request: Request) {
     const validation = validateHeaders(rows[0], kind); if (validation.missing.length) throw new Error(`Missing required columns: ${validation.missing.join(', ')}`)
     const headers = validation.normalized, index = Object.fromEntries(headers.map((header, i) => [header, i])), value = (row: string[], key: string) => row[index[key]] ?? ''
     const dataRows = rows.slice(1).filter(row => row.some(Boolean)); if (!dataRows.length) throw new Error('No data rows were found after the header')
-    const db = createAdminClient(), organizationId = membership.organization_id
+    const organizationId = membership.organization_id
     const { data: existingLanes, error: laneError } = await db.from('lanes').select('id,origin,destination').eq('organization_id', organizationId); if (laneError) throw laneError
     const laneMap = new Map((existingLanes ?? []).map(lane => [laneKey(lane.origin, lane.destination), lane.id])); const warnings = [...validation.optionalMissing]
     let inserted = 0, skipped = 0; const affectedLanes: string[] = []
