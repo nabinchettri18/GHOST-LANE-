@@ -32,10 +32,11 @@ export async function parseOperationalFile(file: File): Promise<string[][]> {
     if (sheet.rowCount > MAX_ROWS) throw new Error('Maximum 5,000 data rows per import')
     const rows: string[][] = []
     sheet.eachRow({ includeEmpty: true }, row => {
-      rows.push(row.values.slice(1).map(value => {
+      const values = row.values ?? []
+      rows.push(values.slice(1).map((value: unknown) => {
         if (value == null) return ''
-        if (typeof value === 'object' && value !== null && 'result' in value) return String(value.result ?? '')
-        if (typeof value === 'object' && value !== null && 'text' in value) return String(value.text ?? '')
+        if (typeof value === 'object' && 'result' in value) return String((value as { result?: unknown }).result ?? '')
+        if (typeof value === 'object' && 'text' in value) return String((value as { text?: unknown }).text ?? '')
         return String(value)
       }))
     })
