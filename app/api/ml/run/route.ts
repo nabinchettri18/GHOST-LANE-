@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { GhostRiskForest, ghostLabel, type GhostObservation } from '@/lib/ml/ghost-risk'
+import { allowRequest, isSameOrigin } from '@/lib/security'
 
 type ContractRow = { id: string; contract_id?: string; lane_id: string; carrier: string; contracted_volume: number; start_date: string; end_date: string }
 type ShipmentRow = { id: string; lane_id: string; carrier: string; shipment_date: string; volume: number; status?: string }
@@ -21,10 +22,12 @@ function evaluateHoldout(train: GhostRiskForest, test: GhostObservation[]) {
   return { accuracy: correct / test.length, precision: tp + fp ? tp / (tp + fp) : 0, recall: tp + fn ? tp / (tp + fn) : 0, samples: test.length }
 }
 
-export async function POST() {
+export async function POST(request: Request) {
+  if (!isSameOrigin(request)) return NextResponse.json({ error: 'Cross-origin request rejected' }, { status: 403 })
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!allowRequest(`ml:${user.id}`, 5, 60_000)) return NextResponse.json({ error: 'Too many ML runs. Please wait a minute.' }, { status: 429 })
 
   const { data: membership } = await supabase.from('organization_members').select('organization_id').eq('user_id', user.id).limit(1).maybeSingle()
   if (!membership) return NextResponse.json({ error: 'No workspace membership found' }, { status: 403 })
