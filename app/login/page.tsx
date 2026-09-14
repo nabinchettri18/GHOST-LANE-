@@ -12,34 +12,49 @@ export default function LoginPage() {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (loading) return
     setError('')
     setLoading(true)
-    const form = new FormData(event.currentTarget)
-    const email = String(form.get('email') || '').trim()
-    const password = String(form.get('password') || '')
-    const supabase = createClient()
 
-    const { error: signInError } = await supabase.auth.signInWithPassword({ email, password })
-    if (signInError) {
-      setError(signInError.message)
+    try {
+      const form = new FormData(event.currentTarget)
+      const email = String(form.get('email') || '').trim()
+      const password = String(form.get('password') || '')
+      if (!email || !password) throw new Error('Enter your work email and password.')
+
+      const supabase = createClient()
+      const { error: signInError } = await supabase.auth.signInWithPassword({ email, password })
+      if (signInError) throw signInError
+
+      // Workspace provisioning is server-side. Never leave the button spinning
+      // forever if a deployment has a missing/invalid admin configuration.
+      const controller = new AbortController()
+      const timeout = window.setTimeout(() => controller.abort(), 8000)
+      try {
+        const bootstrap = await fetch('/api/workspace/bootstrap', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          signal: controller.signal,
+        })
+        const bootstrapBody = await bootstrap.json().catch(() => ({})) as { error?: string }
+        if (!bootstrap.ok) {
+          throw new Error(bootstrapBody.error || 'We could not initialize your GhostLane workspace.')
+        }
+      } finally {
+        window.clearTimeout(timeout)
+      }
+
+      window.location.assign('/')
+    } catch (caught) {
+      const message = caught instanceof DOMException && caught.name === 'AbortError'
+        ? 'Sign-in is taking too long. Check your Supabase/Vercel configuration and try again.'
+        : caught instanceof Error
+          ? caught.message
+          : 'Unable to sign in. Please try again.'
+      setError(message)
       setLoading(false)
-      return
     }
-
-    const bootstrap = await fetch('/api/workspace/bootstrap', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'same-origin',
-    })
-    const bootstrapBody = await bootstrap.json().catch(() => ({})) as { error?: string }
-    if (!bootstrap.ok) {
-      await supabase.auth.signOut()
-      setError(bootstrapBody.error || 'We could not initialize your GhostLane workspace. Please try again.')
-      setLoading(false)
-      return
-    }
-
-    window.location.assign('/')
   }
 
   return (
