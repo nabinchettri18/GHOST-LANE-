@@ -1,0 +1,11 @@
+shipment_id,origin,destination,carrier,shipment_date,volume,status,expected_cost,actual_cost,expected_transit_hours,actual_transit_hours,eta_date,delivered_at,exception_type,risk_score,notes
+GL-1001,Delhi,Mumbai,NorthStar Logistics,2026-09-01,80,delivered,42000,43800,28,31,2026-09-02,2026-09-02T18:20:00Z,,32,Delivered 3h late
+GL-1002,Delhi,Mumbai,NorthStar Logistics,2026-09-03,75,in_transit,41000,,28,,2026-09-05,,capacity_constraint,74,Carrier capacity tightened
+GL-1003,Delhi,Mumbai,SwiftHaul,2026-09-04,90,delivered,44500,43100,29,27,2026-09-05,2026-09-05T10:15:00Z,,18,Under plan
+GL-1004,Delhi,Mumbai,SwiftHaul,2026-09-06,70,delayed,40000,41700,27,39,2026-09-08,,eta_deviation,88,ETA moved by 12h
+GL-1005,Delhi,Bengaluru,BlueRoute Freight,2026-09-01,60,delivered,36500,37200,34,36,2026-09-03,2026-09-03T14:00:00Z,,41,Minor transit variance
+GL-1006,Delhi,Bengaluru,BlueRoute Freight,2026-09-05,55,in_transit,35000,,34,,2026-09-07,,capacity_constraint,66,Carrier acceptance below lane average
+GL-1007,Mumbai,Pune,MetroMove,2026-09-02,45,delivered,18500,17900,9,8,2026-09-02,2026-09-02T16:00:00Z,,12,Strong execution
+GL-1008,Mumbai,Pune,MetroMove,2026-09-05,50,delivered,19000,21400,9,13,2026-09-06,2026-09-06T09:10:00Z,cost_overrun,69,Actual cost above expectation
+GL-1009,Chandigarh,Delhi,SwiftHaul,2026-09-03,40,delivered,12200,11800,6,6,2026-09-03,2026-09-03T12:30:00Z,,8,On plan
+GL-1010,Chandigarh,Delhi,SwiftHaul,2026-09-07,42,cancelled,12500,,6,,2026-09-07,,carrier_cancellation,93,Cancelled before dispatch
