@@ -1,7 +1,7 @@
 export type ImportKind = 'lanes' | 'contracts' | 'shipments' | 'carriers'
 
 // Only identity / minimum operational fields block an import.
-// Analytics fields are optional so partial company exports can still be used.
+// Analytics and execution fields are optional so partial company exports can still be used.
 export const REQUIRED_COLUMNS: Record<ImportKind, string[]> = {
   lanes: ['origin', 'destination'],
   contracts: ['contract_id', 'origin', 'destination', 'carrier'],
@@ -12,7 +12,7 @@ export const REQUIRED_COLUMNS: Record<ImportKind, string[]> = {
 export const OPTIONAL_COLUMNS: Record<ImportKind, string[]> = {
   lanes: ['mode', 'distance_km', 'contracted_volume', 'materialized_volume', 'carrier', 'risk_score'],
   contracts: ['contracted_volume', 'contract_rate', 'start_date', 'end_date'],
-  shipments: ['shipment_date', 'volume', 'status'],
+  shipments: ['shipment_date', 'volume', 'status', 'expected_cost', 'actual_cost', 'expected_transit_hours', 'actual_transit_hours', 'eta_date', 'delivered_at', 'exception_type', 'risk_score', 'notes'],
   carriers: ['acceptance_rate', 'rejection_rate', 'cancellation_rate', 'realization_rate'],
 }
 
