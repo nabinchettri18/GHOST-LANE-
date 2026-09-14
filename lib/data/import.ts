@@ -1,10 +1,19 @@
 export type ImportKind = 'lanes' | 'contracts' | 'shipments' | 'carriers'
 
+// Only identity / minimum operational fields block an import.
+// Analytics fields are optional so partial company exports can still be used.
 export const REQUIRED_COLUMNS: Record<ImportKind, string[]> = {
-  lanes: ['origin', 'destination', 'mode', 'contracted_volume', 'materialized_volume'],
-  contracts: ['contract_id', 'origin', 'destination', 'carrier', 'contracted_volume', 'contract_rate', 'start_date', 'end_date'],
-  shipments: ['shipment_id', 'origin', 'destination', 'carrier', 'shipment_date', 'volume', 'status'],
-  carriers: ['carrier', 'acceptance_rate', 'rejection_rate', 'cancellation_rate'],
+  lanes: ['origin', 'destination'],
+  contracts: ['contract_id', 'origin', 'destination', 'carrier'],
+  shipments: ['shipment_id', 'origin', 'destination', 'carrier'],
+  carriers: ['carrier'],
+}
+
+export const OPTIONAL_COLUMNS: Record<ImportKind, string[]> = {
+  lanes: ['mode', 'distance_km', 'contracted_volume', 'materialized_volume', 'carrier', 'risk_score'],
+  contracts: ['contracted_volume', 'contract_rate', 'start_date', 'end_date'],
+  shipments: ['shipment_date', 'volume', 'status'],
+  carriers: ['acceptance_rate', 'rejection_rate', 'cancellation_rate', 'realization_rate'],
 }
 
 export function parseCsv(text: string): string[][] {
@@ -34,5 +43,10 @@ export function parseCsv(text: string): string[][] {
 export function validateHeaders(headers: string[], kind: ImportKind) {
   const normalized = headers.map(h => h.trim().toLowerCase())
   const required = REQUIRED_COLUMNS[kind]
-  return { missing: required.filter(col => !normalized.includes(col)), normalized }
+  const optional = OPTIONAL_COLUMNS[kind]
+  return {
+    missing: required.filter(col => !normalized.includes(col)),
+    optionalMissing: optional.filter(col => !normalized.includes(col)),
+    normalized,
+  }
 }
