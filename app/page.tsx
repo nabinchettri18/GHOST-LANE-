@@ -12,6 +12,14 @@ const contractSelect = 'contract_id,lane_id,carrier,contracted_volume,contract_r
 const carrierSelect = 'name,acceptance_rate,rejection_rate,cancellation_rate,realization_rate'
 
 export default async function Home({ searchParams }: { searchParams: SearchParams }) {
+  // Keep the public homepage renderable even if a preview deployment is missing
+  // Supabase variables. Authenticated data loads only when Supabase is configured.
+  const hasSupabaseConfig = Boolean(
+    process.env.NEXT_PUBLIC_SUPABASE_URL &&
+    (process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY)
+  )
+  if (!hasSupabaseConfig) return <LandingPage />
+
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return <LandingPage />
@@ -27,9 +35,6 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
     return <AppShell><GhostLaneWorkspace view="overview" lanes={[]} shipments={[]} contracts={[]} carriers={[]} /></AppShell>
   }
 
-  // A user can belong to more than one workspace. Pick the workspace that
-  // actually contains operational records instead of blindly using the oldest
-  // membership (which previously made a populated dashboard appear empty).
   const candidates = await Promise.all(memberships.map(async (membership) => {
     const org = membership.organization_id
     const [lanes, shipments, contracts, carriers] = await Promise.all([
