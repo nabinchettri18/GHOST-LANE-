@@ -1,5 +1,7 @@
-import * as XLSX from 'xlsx'
+import ExcelJS from 'exceljs'
 import { parseCsv } from './import'
+
+const MAX_ROWS = 5001
 
 export async function parseOperationalFile(file: File): Promise<string[][]> {
   const name = file.name.toLowerCase()
@@ -13,6 +15,7 @@ export async function parseOperationalFile(file: File): Promise<string[][]> {
     const records: Record<string, unknown>[] = name.endsWith('.json')
       ? (() => { const value = JSON.parse(text); return Array.isArray(value) ? value : [value] })()
       : text.split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line))
+    if (records.length > MAX_ROWS - 1) throw new Error('Maximum 5,000 data rows per import')
     if (!records.length) return []
     const headers = [...new Set(records.flatMap(record => Object.keys(record)))]
     return [headers, ...records.map(record => headers.map(header => {
@@ -21,12 +24,23 @@ export async function parseOperationalFile(file: File): Promise<string[][]> {
     }))]
   }
 
-  if (name.endsWith('.xlsx') || name.endsWith('.xls') || name.endsWith('.xlsm') || name.endsWith('.ods')) {
-    const workbook = XLSX.read(bytes, { type: 'array', cellDates: false })
-    const sheet = workbook.Sheets[workbook.SheetNames[0]]
+  if (name.endsWith('.xlsx') || name.endsWith('.xlsm')) {
+    const workbook = new ExcelJS.Workbook()
+    await workbook.xlsx.load(bytes)
+    const sheet = workbook.worksheets[0]
     if (!sheet) return []
-    return XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1, raw: false, defval: '' }) as string[][]
+    if (sheet.rowCount > MAX_ROWS) throw new Error('Maximum 5,000 data rows per import')
+    const rows: string[][] = []
+    sheet.eachRow({ includeEmpty: true }, row => {
+      rows.push(row.values.slice(1).map(value => {
+        if (value == null) return ''
+        if (typeof value === 'object' && 'result' in value) return String(value.result ?? '')
+        if (typeof value === 'object' && 'text' in value) return String(value.text ?? '')
+        return String(value)
+      }))
+    })
+    return rows
   }
 
-  throw new Error('This file format is not yet supported for structured import. Use CSV, TSV, TXT, JSON, JSONL, NDJSON, Excel, or ODS.')
+  throw new Error('This file format is not supported for secure import. Use CSV, TSV, TXT, JSON, JSONL, NDJSON, XLSX or XLSM.')
 }
