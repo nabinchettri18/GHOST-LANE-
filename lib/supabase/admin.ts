@@ -1,9 +1,14 @@
 import { createClient } from '@supabase/supabase-js'
 
-/** Server-only Supabase client for trusted workspace provisioning. */
+/**
+ * Server-side Supabase client.
+ * Prefer the secret/service-role key for trusted operations, but fall back to
+ * the public key so a missing optional admin secret never takes the whole app
+ * down during a preview/demo deployment.
+ */
 export function createAdminClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const key = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY
-  if (!url || !key) throw new Error('Supabase server secret is not configured')
+  const key = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  if (!url || !key) throw new Error('Supabase configuration is missing')
   return createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } })
 }
