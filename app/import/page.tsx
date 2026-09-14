@@ -1,13 +1,153 @@
 'use client'
+
 import { ChangeEvent, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { CheckCircle2, Database, FileUp, ShieldCheck, UploadCloud, XCircle, ArrowLeft, Download } from 'lucide-react'
+import { CheckCircle2, Database, FileUp, ShieldCheck, UploadCloud, XCircle, ArrowLeft } from 'lucide-react'
 import { parseCsv, validateHeaders, type ImportKind } from '@/lib/data/import'
-const kinds: { id: ImportKind; label: string; description: string; template?: string }[] = [
- { id:'lanes',label:'Lane records',description:'Origin, destination, mode and capacity realization.',template:'/templates/ghostlane-lanes-demo.csv' },
- { id:'contracts',label:'Contracts',description:'Committed capacity, rates, carriers and dates.',template:'/templates/ghostlane-contracts-demo.csv' },
- { id:'shipments',label:'Shipments',description:'Actual movement records and volumes.',template:'/templates/ghostlane-shipments-demo.csv' },
- { id:'carriers',label:'Carriers',description:'Carrier acceptance, rejection and cancellation metrics.' },
+
+const kinds: { id: ImportKind; label: string; description: string }[] = [
+  { id: 'lanes', label: 'Lane records', description: 'Origin, destination, mode and capacity realization.' },
+  { id: 'contracts', label: 'Contracts', description: 'Committed capacity, rates, carriers and dates.' },
+  { id: 'shipments', label: 'Shipments', description: 'Actual movement records and volumes.' },
+  { id: 'carriers', label: 'Carriers', description: 'Carrier acceptance, rejection and cancellation metrics.' },
 ]
-const ACCEPTED='.csv,.txt,.json,.xlsx,.xlsm,.tsv,.ndjson,.jsonl';const extensions=['.csv','.tsv','.txt','.json','.ndjson','.jsonl','.xlsx','.xlsm'];const textExtensions=['.csv','.tsv','.txt','.json','.ndjson','.jsonl']
-export default function ImportPage(){const[kind,setKind]=useState<ImportKind>('lanes');const[file,setFile]=useState<File|null>(null);const[error,setError]=useState('');const[success,setSuccess]=useState('');const[loading,setLoading]=useState(false);const[rows,setRows]=useState<string[][]>([]);const selected=kinds.find(k=>k.id===kind)!;const isText=file?textExtensions.some(x=>file.name.toLowerCase().endsWith(x)):false;const validation=useMemo(()=>rows.length&&isText?validateHeaders(rows[0],kind):null,[rows,kind,isText]);async function onFile(event:ChangeEvent<HTMLInputElement>){const next=event.target.files?.[0];setError('');setSuccess('');setRows([]);setFile(next??null);if(!next)return;const lower=next.name.toLowerCase();const textFile=textExtensions.some(x=>lower.endsWith(x));if(next.size>10*1024*1024){setError('File exceeds the 10 MB upload limit.');return}if(!extensions.some(x=>lower.endsWith(x))){setError('Unsupported file type. Use CSV, TSV, TXT, JSON, JSONL, NDJSON, XLSX or XLSM.');return}if(textFile){try{const parsed=parseCsv(await next.text());if(!parsed.length){setError('The file contains no readable rows.');return}if(parsed.length>5001){setError('Maximum 5,000 data rows per import.');return}setRows(parsed)}catch{setError('The file could not be parsed.')}}}async function importData(){if(!file||(isText&&(!rows.length||validation?.missing.length)))return;setLoading(true);setError('');setSuccess('');const form=new FormData();form.append('kind',kind);form.append('file',file);try{const response=await fetch('/api/workspace/import-file',{method:'POST',body:form});const result=await response.json();if(!response.ok)throw new Error(result.error||'Import failed');setSuccess(`${result.imported.toLocaleString()} ${kind} records imported successfully. Refresh the overview to see the updated intelligence.`);setFile(null);setRows([])}catch(e){setError(e instanceof Error?e.message:'Import failed')}finally{setLoading(false)}}return <main className="min-h-screen bg-[#f7f9fc] px-5 py-8 text-[#08111f] sm:px-8 sm:py-10"><div className="mx-auto max-w-[1080px]"><Link href="/" className="inline-flex items-center gap-2 text-xs font-bold text-[#1769e0]"><ArrowLeft size={14}/>Back to overview</Link><div className="mt-5 border-b border-[#dbe2ec] pb-7"><p className="text-[11px] font-extrabold uppercase tracking-[.18em] text-[#1769e0]">Data ingestion</p><h1 className="mt-2 text-3xl font-black tracking-[-.04em]">Connect operational data</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-[#66758a]">Import structured operational files. GhostLane validates dataset type, required columns and organization access before writing records.</p></div><div className="mt-7 grid gap-6 lg:grid-cols-[280px_1fr]"><aside className="rounded-2xl border border-[#dbe2ec] bg-white p-4"><p className="px-3 pb-3 text-[10px] font-extrabold uppercase tracking-[.14em] text-[#8490a0]">Data type</p>{kinds.map(item=><button type="button" key={item.id} onClick={()=>{setKind(item.id);setRows([]);setFile(null);setError('');setSuccess('')}} className={`mb-1 w-full rounded-xl p-3 text-left ${kind===item.id?'bg-[#edf4ff]':'hover:bg-[#f6f8fb]'}`}><div className="text-xs font-extrabold">{item.label}</div><div className="mt-1 text-[11px] leading-4 text-[#788596]">{item.description}</div></button>)}</aside><section className="rounded-2xl border border-[#dbe2ec] bg-white p-6 sm:p-8"><div className="flex items-start gap-3"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#edf4ff] text-[#1769e0]"><Database size={18}/></div><div className="flex-1"><div className="flex items-start justify-between gap-4"><div><h2 className="text-sm font-extrabold">{selected.label}</h2><p className="mt-1 text-xs leading-5 text-[#788596]">{selected.description}</p></div>{selected.template&&<a href={selected.template} download className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-[#dbe2ec] bg-white px-3 py-2 text-[10px] font-extrabold text-[#526174] hover:border-[#1769e0] hover:text-[#1769e0]"><Download size={13}/>Demo CSV</a>}</div></div></div><label className="mt-7 flex min-h-[220px] cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-[#bfcbd9] bg-[#fafbfd] px-6 text-center hover:border-[#1769e0]"><UploadCloud size={26} className="text-[#1769e0]"/><span className="mt-4 text-sm font-extrabold">Choose a file</span><span className="mt-1 text-xs text-[#8490a0]">CSV, TSV, TXT, JSON, XLSX or XLSM · maximum 10 MB</span><input type="file" accept={ACCEPTED} className="hidden" onChange={onFile}/></label>{file&&<div className="mt-4 flex items-center justify-between rounded-xl border border-[#dbe2ec] p-4"><div><p className="text-xs font-bold">{file.name}</p><p className="mt-1 text-[11px] text-[#8490a0]">{(file.size/1024).toFixed(1)} KB {isText&&rows.length?`· ${rows.length-1} data rows`:'· ready for server parsing'}</p></div>{isText&&rows.length?<CheckCircle2 size={18} className="text-[#187650]"/>:<FileUp size={18} className="text-[#1769e0]"/>}</div>}{error&&<div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-xs font-semibold text-red-700">{error}</div>}{success&&<div className="mt-4 rounded-xl border border-green-200 bg-green-50 p-4 text-xs font-semibold text-green-700">{success}</div>}{validation&&<div className={`mt-4 rounded-xl border p-4 ${validation.missing.length?'border-amber-200 bg-amber-50':'border-green-200 bg-green-50'}`}><div className="flex items-center gap-2 text-xs font-extrabold">{validation.missing.length?<XCircle size={16}/>:<CheckCircle2 size={16}/>} {validation.missing.length?'Validation requires attention':'Headers validated'}</div>{validation.missing.length&&<p className="mt-2 text-xs">Missing required columns: <strong>{validation.missing.join(', ')}</strong></p>}</div>}{rows.length>1&&!validation?.missing.length&&<div className="mt-7 overflow-x-auto rounded-xl border border-[#e1e7ef]"><table className="w-full min-w-[650px] text-left text-[11px]"><thead className="bg-[#fafbfd]"><tr>{rows[0].map(h=><th key={h} className="px-3 py-2.5 font-extrabold uppercase tracking-wide text-[#8490a0]">{h}</th>)}</tr></thead><tbody>{rows.slice(1,6).map((r,i)=><tr key={i} className="border-t border-[#edf0f5]">{rows[0].map((_,j)=><td key={j} className="px-3 py-2.5">{r[j]??''}</td>)}</tr>)}</tbody></table></div>}{file&&(!isText||(rows.length>1&&!validation?.missing.length))&&<div className="mt-5 flex items-center justify-between gap-4 rounded-xl bg-[#f6f8fb] p-3 text-[11px] text-[#66758a]"><div className="flex items-center gap-2"><ShieldCheck size={15}/> Authorization and validation run server-side.</div><button type="button" disabled={loading} onClick={importData} className="shrink-0 rounded-lg bg-[#1769e0] px-4 py-2 text-xs font-bold text-white disabled:opacity-60">{loading?'Importing…':'Import records'}</button></div>}</section></div></div></main>}
+
+const ACCEPTED = '.csv,.txt,.json,.xlsx,.xlsm,.tsv,.ndjson,.jsonl'
+const extensions = ['.csv', '.tsv', '.txt', '.json', '.ndjson', '.jsonl', '.xlsx', '.xlsm']
+const textExtensions = ['.csv', '.tsv', '.txt', '.json', '.ndjson', '.jsonl']
+
+export default function ImportPage() {
+  const [kind, setKind] = useState<ImportKind>('lanes')
+  const [file, setFile] = useState<File | null>(null)
+  const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [rows, setRows] = useState<string[][]>([])
+
+  const selected = kinds.find((item) => item.id === kind)!
+  const isText = file ? textExtensions.some((x) => file.name.toLowerCase().endsWith(x)) : false
+  const validation = useMemo(
+    () => (rows.length && isText ? validateHeaders(rows[0], kind) : null),
+    [rows, kind, isText],
+  )
+
+  async function onFile(event: ChangeEvent<HTMLInputElement>) {
+    const next = event.target.files?.[0]
+    setError('')
+    setSuccess('')
+    setRows([])
+    setFile(next ?? null)
+    if (!next) return
+
+    const lower = next.name.toLowerCase()
+    const textFile = textExtensions.some((x) => lower.endsWith(x))
+    if (next.size > 10 * 1024 * 1024) {
+      setError('File exceeds the 10 MB upload limit.')
+      return
+    }
+    if (!extensions.some((x) => lower.endsWith(x))) {
+      setError('Unsupported file type. Use CSV, TSV, TXT, JSON, JSONL, NDJSON, XLSX or XLSM.')
+      return
+    }
+
+    if (textFile) {
+      try {
+        const parsed = parseCsv(await next.text())
+        if (!parsed.length) {
+          setError('The file contains no readable rows.')
+          return
+        }
+        if (parsed.length > 5001) {
+          setError('Maximum 5,000 data rows per import.')
+          return
+        }
+        setRows(parsed)
+      } catch {
+        setError('The file could not be parsed.')
+      }
+    }
+  }
+
+  async function importData() {
+    if (!file || (isText && (!rows.length || validation?.missing.length))) return
+    setLoading(true)
+    setError('')
+    setSuccess('')
+    const form = new FormData()
+    form.append('kind', kind)
+    form.append('file', file)
+
+    try {
+      const response = await fetch('/api/workspace/import-file', { method: 'POST', body: form })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error || 'Import failed')
+      setSuccess(`${result.imported.toLocaleString()} ${kind} records imported successfully. Refresh the overview to see the updated intelligence.`)
+      setFile(null)
+      setRows([])
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Import failed')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <main className="min-h-screen bg-[#f7f9fc] px-5 py-8 text-[#08111f] sm:px-8 sm:py-10">
+      <div className="mx-auto max-w-[1080px]">
+        <Link href="/" className="inline-flex items-center gap-2 text-xs font-bold text-[#1769e0]"><ArrowLeft size={14} />Back to overview</Link>
+        <div className="mt-5 border-b border-[#dbe2ec] pb-7">
+          <p className="text-[11px] font-extrabold uppercase tracking-[.18em] text-[#1769e0]">Data ingestion</p>
+          <h1 className="mt-2 text-3xl font-black tracking-[-.04em]">Connect your company data</h1>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-[#66758a]">GhostLane starts with your operational records. Upload a company dataset and every dashboard insight is generated from the data you provide.</p>
+        </div>
+
+        <div className="mt-7 grid gap-6 lg:grid-cols-[280px_1fr]">
+          <aside className="rounded-2xl border border-[#dbe2ec] bg-white p-4">
+            <p className="px-3 pb-3 text-[10px] font-extrabold uppercase tracking-[.14em] text-[#8490a0]">Data type</p>
+            {kinds.map((item) => (
+              <button type="button" key={item.id} onClick={() => { setKind(item.id); setRows([]); setFile(null); setError(''); setSuccess('') }} className={`mb-1 w-full rounded-xl p-3 text-left ${kind === item.id ? 'bg-[#edf4ff]' : 'hover:bg-[#f6f8fb]'}`}>
+                <div className="text-xs font-extrabold">{item.label}</div>
+                <div className="mt-1 text-[11px] leading-4 text-[#788596]">{item.description}</div>
+              </button>
+            ))}
+          </aside>
+
+          <section className="rounded-2xl border border-[#dbe2ec] bg-white p-6 sm:p-8">
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#edf4ff] text-[#1769e0]"><Database size={18} /></div>
+              <div>
+                <h2 className="text-sm font-extrabold">{selected.label}</h2>
+                <p className="mt-1 text-xs leading-5 text-[#788596]">{selected.description}</p>
+              </div>
+            </div>
+
+            <div className="mt-6 rounded-xl border border-[#e5eaf0] bg-[#fafbfd] p-4">
+              <p className="text-[10px] font-black uppercase tracking-[.12em] text-[#8490a0]">Required fields</p>
+              <p className="mt-2 text-xs leading-5 text-[#66758a]">Upload your company's file using the required columns for <strong>{selected.label.toLowerCase()}</strong>. GhostLane will validate the headers before importing anything.</p>
+            </div>
+
+            <label className="mt-5 flex min-h-[220px] cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-[#bfcbd9] bg-[#fafbfd] px-6 text-center hover:border-[#1769e0]">
+              <UploadCloud size={26} className="text-[#1769e0]" />
+              <span className="mt-4 text-sm font-extrabold">Choose your company file</span>
+              <span className="mt-1 text-xs text-[#8490a0]">CSV, TSV, TXT, JSON, XLSX or XLSM · maximum 10 MB</span>
+              <input type="file" accept={ACCEPTED} className="hidden" onChange={onFile} />
+            </label>
+
+            {file && <div className="mt-4 flex items-center justify-between rounded-xl border border-[#dbe2ec] p-4"><div><p className="text-xs font-bold">{file.name}</p><p className="mt-1 text-[11px] text-[#8490a0]">{(file.size / 1024).toFixed(1)} KB {isText && rows.length ? `· ${rows.length - 1} data rows` : '· ready for server parsing'}</p></div>{isText && rows.length ? <CheckCircle2 size={18} className="text-[#187650]" /> : <FileUp size={18} className="text-[#1769e0]" />}</div>}
+            {error && <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-xs font-semibold text-red-700">{error}</div>}
+            {success && <div className="mt-4 rounded-xl border border-green-200 bg-green-50 p-4 text-xs font-semibold text-green-700">{success}</div>}
+
+            {validation && <div className={`mt-4 rounded-xl border p-4 ${validation.missing.length ? 'border-amber-200 bg-amber-50' : 'border-green-200 bg-green-50'}`}>
+              <div className="flex items-center gap-2 text-xs font-extrabold">{validation.missing.length ? <XCircle size={16} /> : <CheckCircle2 size={16} />}{validation.missing.length ? 'Validation requires attention' : 'Headers validated'}</div>
+              {validation.missing.length > 0 && <p className="mt-2 text-xs">Missing required columns: <strong>{validation.missing.join(', ')}</strong></p>}
+            </div>}
+
+            {rows.length > 1 && !validation?.missing.length && <div className="mt-7 overflow-x-auto rounded-xl border border-[#e1e7ef]"><table className="w-full min-w-[650px] text-left text-[11px]"><thead className="bg-[#fafbfd]"><tr>{rows[0].map((h) => <th key={h} className="px-3 py-2.5 font-extrabold uppercase tracking-wide text-[#8490a0]">{h}</th>)}</tr></thead><tbody>{rows.slice(1, 6).map((r, i) => <tr key={i} className="border-t border-[#edf0f5]">{rows[0].map((_, j) => <td key={j} className="px-3 py-2.5">{r[j] ?? ''}</td>)}</tr>)}</tbody></table></div>}
+
+            {file && (!isText || (rows.length > 1 && !validation?.missing.length)) && <div className="mt-5 flex items-center justify-between gap-4 rounded-xl bg-[#f6f8fb] p-3 text-[11px] text-[#66758a]"><div className="flex items-center gap-2"><ShieldCheck size={15} /> Authorization and validation run server-side.</div><button type="button" disabled={loading} onClick={importData} className="shrink-0 rounded-lg bg-[#1769e0] px-4 py-2 text-xs font-bold text-white disabled:opacity-60">{loading ? 'Importing…' : 'Import company data'}</button></div>}
+          </section>
+        </div>
+      </div>
+    </main>
+  )
+}
