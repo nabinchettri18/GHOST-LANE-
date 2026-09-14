@@ -26,7 +26,7 @@ export async function parseOperationalFile(file: File): Promise<string[][]> {
 
   if (name.endsWith('.xlsx') || name.endsWith('.xlsm')) {
     const workbook = new ExcelJS.Workbook()
-    await workbook.xlsx.load(bytes)
+    await workbook.xlsx.load(Buffer.from(bytes))
     const sheet = workbook.worksheets[0]
     if (!sheet) return []
     if (sheet.rowCount > MAX_ROWS) throw new Error('Maximum 5,000 data rows per import')
@@ -34,8 +34,8 @@ export async function parseOperationalFile(file: File): Promise<string[][]> {
     sheet.eachRow({ includeEmpty: true }, row => {
       rows.push(row.values.slice(1).map(value => {
         if (value == null) return ''
-        if (typeof value === 'object' && 'result' in value) return String(value.result ?? '')
-        if (typeof value === 'object' && 'text' in value) return String(value.text ?? '')
+        if (typeof value === 'object' && value !== null && 'result' in value) return String(value.result ?? '')
+        if (typeof value === 'object' && value !== null && 'text' in value) return String(value.text ?? '')
         return String(value)
       }))
     })
