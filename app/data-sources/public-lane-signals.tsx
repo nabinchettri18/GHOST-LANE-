@@ -13,16 +13,17 @@ type Signals = {
 }
 
 export function PublicLaneSignals() {
-  const [origin, setOrigin] = useState('Delhi, India')
-  const [destination, setDestination] = useState('Mumbai, India')
+  const [origin, setOrigin] = useState('')
+  const [destination, setDestination] = useState('')
   const [signals, setSignals] = useState<Signals | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
   async function run() {
+    if (!origin.trim() || !destination.trim()) return
     setLoading(true); setError('')
     try {
-      const response = await fetch(`/api/public-data/lane?origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(destination)}`)
+      const response = await fetch(`/api/public-data/lane?origin=${encodeURIComponent(origin.trim())}&destination=${encodeURIComponent(destination.trim())}`)
       const body = await response.json()
       if (!response.ok) throw new Error(body.error || 'Unable to load public signals')
       setSignals(body.signals)
@@ -44,13 +45,13 @@ export function PublicLaneSignals() {
 
   return <section className="mt-5 rounded-2xl border border-[#dbe2ec] bg-white p-5">
     <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-      <div><div className="flex items-center gap-2 text-xs font-bold"><Route size={15} className="text-[#1769e0]"/> Live public logistics signals</div><p className="mt-1 text-xs text-[#8490a0]">Open weather + global geocoding data. No private carrier connection required.</p></div>
+      <div><div className="flex items-center gap-2 text-xs font-bold"><Route size={15} className="text-[#1769e0]"/> Public lane signals</div><p className="mt-1 text-xs text-[#8490a0]">Add a real lane to enrich it with public weather and distance context. No demo lane is preloaded.</p></div>
       <div className="flex flex-wrap gap-2 text-[10px] font-bold text-[#526174]"><span className="rounded-full bg-[#f3f7fc] px-2.5 py-1">Open-Meteo</span><span className="rounded-full bg-[#f3f7fc] px-2.5 py-1">Global</span><span className="rounded-full bg-[#f3f7fc] px-2.5 py-1">Cached 15 min</span></div>
     </div>
     <div className="mt-5 grid gap-3 md:grid-cols-[1fr_1fr_auto]">
-      <label className="text-[10px] font-bold uppercase tracking-[.1em] text-[#8490a0]">Origin<input value={origin} onChange={e=>setOrigin(e.target.value)} className="mt-2 h-10 w-full rounded-xl border border-[#dbe2ec] px-3 text-sm font-semibold normal-case tracking-normal outline-none focus:border-[#1769e0]"/></label>
-      <label className="text-[10px] font-bold uppercase tracking-[.1em] text-[#8490a0]">Destination<input value={destination} onChange={e=>setDestination(e.target.value)} className="mt-2 h-10 w-full rounded-xl border border-[#dbe2ec] px-3 text-sm font-semibold normal-case tracking-normal outline-none focus:border-[#1769e0]"/></label>
-      <button onClick={run} disabled={loading || !origin || !destination} className="h-10 rounded-xl bg-[#08111f] px-5 text-xs font-bold text-white disabled:opacity-50">{loading ? <Loader2 className="animate-spin" size={15}/> : 'Analyze lane'}</button>
+      <label className="text-[10px] font-bold uppercase tracking-[.1em] text-[#8490a0]">Origin<input placeholder="e.g. Ludhiana, India" value={origin} onChange={e=>setOrigin(e.target.value)} className="mt-2 h-10 w-full rounded-xl border border-[#dbe2ec] px-3 text-sm font-semibold normal-case tracking-normal outline-none focus:border-[#1769e0]"/></label>
+      <label className="text-[10px] font-bold uppercase tracking-[.1em] text-[#8490a0]">Destination<input placeholder="e.g. Delhi, India" value={destination} onChange={e=>setDestination(e.target.value)} className="mt-2 h-10 w-full rounded-xl border border-[#dbe2ec] px-3 text-sm font-semibold normal-case tracking-normal outline-none focus:border-[#1769e0]"/></label>
+      <button onClick={run} disabled={loading || !origin.trim() || !destination.trim()} className="h-10 rounded-xl bg-[#08111f] px-5 text-xs font-bold text-white disabled:opacity-50">{loading ? <Loader2 className="animate-spin" size={15}/> : 'Analyze lane'}</button>
     </div>
     {error && <div className="mt-3 rounded-xl bg-red-50 p-3 text-xs font-semibold text-red-700">{error}</div>}
     {signals && <div className="mt-5">
@@ -61,7 +62,7 @@ export function PublicLaneSignals() {
         <div className="rounded-xl bg-[#f7f9fc] p-4"><div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[.1em] text-[#8490a0]"><Wind size={13}/> Max wind</div><div className="mt-2 text-xl font-black">{Math.max(signals.originWeather.windKph ?? 0, signals.destinationWeather.windKph ?? 0)} km/h</div></div>
       </div>
       <div className="mt-3 grid gap-3 md:grid-cols-2">{weather(signals.origin.name, signals.originWeather)}{weather(signals.destination.name, signals.destinationWeather)}</div>
-      <p className="mt-3 text-[10px] text-[#8490a0]">Source: Open-Meteo weather models and GeoNames-based geocoding. Use licensed/authorized government and commercial feeds for production-grade contractual decisions.</p>
+      <p className="mt-3 text-[10px] text-[#8490a0]">Public context is advisory. Contractual or regulated decisions should use authorized government/commercial feeds supplied by the operator.</p>
     </div>}
   </section>
 }
