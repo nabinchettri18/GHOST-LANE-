@@ -26,21 +26,20 @@ export async function parseOperationalFile(file: File): Promise<string[][]> {
 
   if (name.endsWith('.xlsx') || name.endsWith('.xlsm')) {
     const workbook = new ExcelJS.Workbook()
-    await workbook.xlsx.load(Buffer.from(bytes))
+    // ExcelJS 4.x exposes a Node Buffer overload whose generic differs from @types/node 24.
+    // Keep the compatibility cast isolated at this third-party library boundary.
+    await workbook.xlsx.load(bytes as unknown as Parameters<typeof workbook.xlsx.load>[0])
     const sheet = workbook.worksheets[0]
-    if (!sheet) return []
+    if (sheet == null) return []
     if (sheet.rowCount > MAX_ROWS) throw new Error('Maximum 5,000 data rows per import')
-    const rows: string[][] = []
-    sheet.eachRow({ includeEmpty: true }, row => {
-      const values = row.values ?? []
-      rows.push(values.slice(1).map((value: unknown) => {
-        if (value == null) return ''
-        if (typeof value === 'object' && 'result' in value) return String((value as { result?: unknown }).result ?? '')
-        if (typeof value === 'object' && 'text' in value) return String((value as { text?: unknown }).text ?? '')
-        return String(value)
-      }))
-    })
-    return rows
+
+    const values = sheet.getSheetValues() as unknown[][]
+    return values.filter(Boolean).map(row => row.slice(1).map(value => {
+      if (value == null) return ''
+      if (typeof value === 'object' && 'result' in value) return String((value as { result?: unknown }).result ?? '')
+      if (typeof value === 'object' && 'text' in value) return String((value as { text?: unknown }).text ?? '')
+      return String(value)
+    }))
   }
 
   throw new Error('This file format is not supported for secure import. Use CSV, TSV, TXT, JSON, JSONL, NDJSON, XLSX or XLSM.')
