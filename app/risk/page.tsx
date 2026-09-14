@@ -1,4 +1,5 @@
 import { AppShell } from '@/components/app-shell'
+import { AIInvestigator } from '@/components/ai-investigator'
 import { MLRiskPanel } from '@/components/ml-risk-panel'
 import { createClient } from '@/lib/supabase/server'
 import { laneMetrics, type LaneRecord } from '@/lib/data/analytics'
@@ -16,5 +17,6 @@ export default async function Risk() {
 <section className="mt-7 overflow-hidden rounded-2xl border border-[#dbe2ec] bg-white"><div className="grid grid-cols-2 border-b border-[#edf0f5] md:grid-cols-4"><div className="p-5"><div className="text-[10px] font-bold uppercase tracking-[.12em] text-[#8490a0]">Lanes assessed</div><div className="mt-2 text-2xl font-black">{lanes.length}</div></div><div className="p-5"><div className="text-[10px] font-bold uppercase tracking-[.12em] text-[#8490a0]">High risk</div><div className="mt-2 text-2xl font-black">{scored.filter(x=>x.risk>=70).length}</div></div><div className="p-5"><div className="text-[10px] font-bold uppercase tracking-[.12em] text-[#8490a0]">Average risk</div><div className="mt-2 text-2xl font-black">{scored.length ? (scored.reduce((s,x)=>s+x.risk,0)/scored.length).toFixed(0) : '0'}</div></div><div className="p-5"><div className="text-[10px] font-bold uppercase tracking-[.12em] text-[#8490a0]">Data basis</div><div className="mt-2 text-sm font-black">Connected records</div></div></div>{scored.length ? <div className="overflow-x-auto"><table className="w-full min-w-[800px] text-left text-xs"><thead className="bg-[#fafbfd] text-[10px] uppercase tracking-[.12em] text-[#8490a0]"><tr><th className="px-5 py-3">Lane</th><th className="px-5 py-3">Mode</th><th className="px-5 py-3">Realization</th><th className="px-5 py-3">Ghost capacity</th><th className="px-5 py-3">Risk</th><th className="px-5 py-3">Signal</th></tr></thead><tbody>{scored.map(x=><tr key={x.lane.id} className="border-t border-[#edf0f5]"><td className="px-5 py-4 font-bold">{x.lane.origin} → {x.lane.destination}</td><td className="px-5 py-4">{x.lane.mode}</td><td className="px-5 py-4">{x.realization.toFixed(1)}%</td><td className="px-5 py-4">{x.ghost.toLocaleString()}</td><td className="px-5 py-4 font-bold">{x.risk.toFixed(0)}</td><td className="px-5 py-4 text-[#66758a]">{x.risk>=70?'Requires review':x.risk>=40?'Watch':'Stable'}</td></tr>)}</tbody></table></div> : <div className="px-5 py-20 text-center text-sm text-[#66758a]">Import lane or contract/shipment data to calculate risk.</div>}</section>
 
 <MLRiskPanel />
+<AIInvestigator />
 </div></main></AppShell>
 }
