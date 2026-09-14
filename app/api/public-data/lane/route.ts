@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { allowRequest, isSameOrigin } from '@/lib/security'
-import { getPublicLaneSignals } from '@/lib/public-data'
+import { getPublicLaneSignals } from '@/app/lib/public-data'
 
 export async function GET(request: Request) {
   if (!isSameOrigin(request)) return NextResponse.json({ error: 'Cross-origin request rejected' }, { status: 403 })
