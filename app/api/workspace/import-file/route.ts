@@ -48,8 +48,9 @@ export async function POST(request: Request) {
   if (file.size > MAX_BYTES) return NextResponse.json({ error: 'File exceeds the 10 MB limit' }, { status: 413 })
   const filename = file.name.toLowerCase(); if (!allowedExtensions.some(ext => filename.endsWith(ext))) return NextResponse.json({ error: 'Unsupported file type' }, { status: 415 })
   try {
-    const { data: membership } = await supabase.from('organization_members').select('organization_id,role').eq('user_id', user.id).order('created_at', { ascending: true }).limit(1).maybeSingle()
-    if (!membership || !['owner', 'admin'].includes(String(membership.role).toLowerCase())) return NextResponse.json({ error: 'Workspace administrator access is required' }, { status: 403 })
+    const { data: membership, error: membershipError } = await supabase.from('organization_members').select('organization_id,role').eq('user_id', user.id).order('created_at', { ascending: true }).limit(1).maybeSingle()
+    if (membershipError) throw new Error(`Workspace membership could not be verified: ${membershipError.message}`)
+    if (!membership?.organization_id) return NextResponse.json({ error: 'No workspace membership found for this account. Create or join a workspace first.' }, { status: 403 })
     const rows = await parseOperationalFile(file)
     if (rows.length < 2) throw new Error('The file must contain a header and at least one data row')
     if (rows.length - 1 > MAX_ROWS) throw new Error('Maximum 5,000 data rows per import')
