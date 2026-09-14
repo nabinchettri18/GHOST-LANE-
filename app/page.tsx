@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { AppShell } from '@/components/app-shell'
 import { LandingPage } from '@/components/landing-page'
 import { GhostLaneWorkspace } from '@/components/ghostlane-workspace'
@@ -15,11 +16,27 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return <LandingPage />
 
+  const db = createAdminClient()
+  const { data: membership, error: membershipError } = await db
+    .from('organization_members')
+    .select('organization_id')
+    .eq('user_id', user.id)
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle()
+
+  if (membershipError || !membership?.organization_id) {
+    return (
+      <AppShell>
+        <GhostLaneWorkspace view="overview" lanes={[]} shipments={[]} contracts={[]} carriers={[]} />
+      </AppShell>
+    )
+  }
+
+  const organizationId = membership.organization_id
   const params = await searchParams
   const view = params.view || 'overview'
 
-  // Avoid fetching the entire workspace for every navigation click. Each view only
-  // loads the records it actually renders, which keeps RSC payloads and DB work small.
   const needsLanes = ['overview', 'lanes', 'forecasts', 'risk', 'recommendations', 'carriers', 'contracts', 'shipments', 'exceptions', 'spend', 'ghost-cost', 'savings', 'copilot'].includes(view)
   const needsShipments = ['overview', 'shipments', 'exceptions', 'copilot'].includes(view)
   const needsContracts = view === 'contracts'
@@ -27,18 +44,18 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
 
   const [lanesResult, shipmentsResult, contractsResult, carriersResult, profileResult] = await Promise.all([
     needsLanes
-      ? supabase.from('lanes').select(laneSelect).order('risk_score', { ascending: false }).limit(view === 'overview' ? 200 : 500)
-      : Promise.resolve({ data: [] as any[] }),
+      ? db.from('lanes').select(laneSelect).eq('organization_id', organizationId).order('risk_score', { ascending: false }).limit(view === 'overview' ? 200 : 500)
+      : Promise.resolve({ data: [] as any[], error: null }),
     needsShipments
-      ? supabase.from('shipments').select(shipmentSelect).order('shipment_date', { ascending: false }).limit(view === 'overview' ? 100 : 500)
-      : Promise.resolve({ data: [] as any[] }),
+      ? db.from('shipments').select(shipmentSelect).eq('organization_id', organizationId).order('shipment_date', { ascending: false }).limit(view === 'overview' ? 100 : 500)
+      : Promise.resolve({ data: [] as any[], error: null }),
     needsContracts
-      ? supabase.from('contracts').select(contractSelect).order('start_date', { ascending: false }).limit(500)
-      : Promise.resolve({ data: [] as any[] }),
+      ? db.from('contracts').select(contractSelect).eq('organization_id', organizationId).order('start_date', { ascending: false }).limit(500)
+      : Promise.resolve({ data: [] as any[], error: null }),
     needsCarriers
-      ? supabase.from('carriers').select(carrierSelect).order('name').limit(250)
-      : Promise.resolve({ data: [] as any[] }),
-    supabase.from('profiles').select('full_name,company_name,role').eq('id', user.id).maybeSingle(),
+      ? db.from('carriers').select(carrierSelect).eq('organization_id', organizationId).order('name').limit(250)
+      : Promise.resolve({ data: [] as any[], error: null }),
+    db.from('profiles').select('full_name,company_name,role').eq('id', user.id).maybeSingle(),
   ])
 
   return (
