@@ -8,7 +8,37 @@ const MAX_BYTES = 10 * 1024 * 1024
 const kinds: ImportKind[] = ['lanes', 'contracts', 'shipments', 'carriers']
 const allowedExtensions = ['.csv', '.tsv', '.txt', '.json', '.jsonl', '.ndjson', '.xlsx', '.xlsm']
 const n = (v: string, field: string, row: number) => { const x = Number(v); if (!Number.isFinite(x)) throw new Error(`${field} must be numeric on row ${row}`); return x }
-const t = (v: string, field: string, row: number) => { const x = v.trim(); if (!x) throw new Error(`${field} is required on row ${row}`); return x.slice(0,500) }
+const t = (v: string, field: string, row: number) => { const x = v.trim(); if (!x) throw new Error(`${field} is required on row ${row}`); return x.slice(0, 500) }
+
+async function refreshLaneVolumes(supabase: Awaited<ReturnType<typeof createClient>>, organizationId: string, refreshContracted: boolean, refreshMaterialized: boolean) {
+  const [{ data: lanes, error: laneError }, { data: contracts, error: contractError }, { data: shipments, error: shipmentError }] = await Promise.all([
+    supabase.from('lanes').select('id, origin, destination').eq('organization_id', organizationId),
+    refreshContracted ? supabase.from('contracts').select('lane_id, contracted_volume').eq('organization_id', organizationId) : Promise.resolve({ data: [], error: null }),
+    refreshMaterialized ? supabase.from('shipments').select('lane_id, volume, status').eq('organization_id', organizationId) : Promise.resolve({ data: [], error: null }),
+  ])
+  if (laneError) throw laneError
+  if (contractError) throw contractError
+  if (shipmentError) throw shipmentError
+
+  const contractedByLane = new Map<string, number>()
+  for (const row of contracts ?? []) contractedByLane.set(row.lane_id, (contractedByLane.get(row.lane_id) ?? 0) + Math.max(0, Number(row.contracted_volume ?? 0)))
+  const materializedByLane = new Map<string, number>()
+  for (const row of shipments ?? []) {
+    const status = String(row.status ?? '').trim().toLowerCase()
+    if (['cancelled', 'canceled', 'rejected', 'void'].includes(status)) continue
+    materializedByLane.set(row.lane_id, (materializedByLane.get(row.lane_id) ?? 0) + Math.max(0, Number(row.volume ?? 0)))
+  }
+
+  for (const lane of lanes ?? []) {
+    const patch: Record<string, number> = {}
+    if (refreshContracted) patch.contracted_volume = Math.round(contractedByLane.get(lane.id) ?? 0)
+    if (refreshMaterialized) patch.materialized_volume = Math.round(materializedByLane.get(lane.id) ?? 0)
+    if (Object.keys(patch).length) {
+      const { error } = await supabase.from('lanes').update(patch).eq('id', lane.id).eq('organization_id', organizationId)
+      if (error) throw error
+    }
+  }
+}
 
 export async function POST(request: Request) {
   if (!isSameOrigin(request)) return NextResponse.json({ error: 'Cross-origin request rejected' }, { status: 403 })
@@ -46,7 +76,7 @@ export async function POST(request: Request) {
       const {error}=await supabase.from('lanes').insert(payload); if(error) throw new Error(error.message)
     } else if (kind === 'carriers') {
       const payload=dataRows.map((r,i)=>({organization_id,name:t(value(r,'carrier'),'carrier',i+2),acceptance_rate:n(value(r,'acceptance_rate'),'acceptance_rate',i+2),rejection_rate:n(value(r,'rejection_rate'),'rejection_rate',i+2),cancellation_rate:n(value(r,'cancellation_rate'),'cancellation_rate',i+2),realization_rate:index.realization_rate===undefined||!value(r,'realization_rate')?null:n(value(r,'realization_rate'),'realization_rate',i+2)}))
-      const {error}=await supabase.from('carriers').insert(payload); if(error) throw new Error(error.message)
+      const {error}=await supabase.from('carriers').insert(payload);if(error)throw new Error(error.message)
     } else {
       const missing=new Map<string,{origin:string;destination:string}>()
       for(const [i,r] of dataRows.entries()){const origin=t(value(r,'origin'),'origin',i+2),destination=t(value(r,'destination'),'destination',i+2),key=`${origin.toLowerCase()}|${destination.toLowerCase()}`;if(!laneKey.has(key))missing.set(key,{origin,destination})}
@@ -54,9 +84,11 @@ export async function POST(request: Request) {
       if(kind==='contracts'){
         const payload=dataRows.map((r,i)=>{const lane_id=laneKey.get(`${value(r,'origin').trim().toLowerCase()}|${value(r,'destination').trim().toLowerCase()}`);if(!lane_id)throw new Error(`Lane could not be resolved on row ${i+2}`);return {organization_id,contract_id:t(value(r,'contract_id'),'contract_id',i+2),lane_id,carrier:t(value(r,'carrier'),'carrier',i+2),contracted_volume:Math.max(0,Math.round(n(value(r,'contracted_volume'),'contracted_volume',i+2))),contract_rate:Math.max(0,n(value(r,'contract_rate'),'contract_rate',i+2)),start_date:t(value(r,'start_date'),'start_date',i+2),end_date:t(value(r,'end_date'),'end_date',i+2)}})
         const {error}=await supabase.from('contracts').insert(payload);if(error)throw new Error(error.message)
+        await refreshLaneVolumes(supabase, organization_id, true, false)
       } else {
         const payload=dataRows.map((r,i)=>{const lane_id=laneKey.get(`${value(r,'origin').trim().toLowerCase()}|${value(r,'destination').trim().toLowerCase()}`);if(!lane_id)throw new Error(`Lane could not be resolved on row ${i+2}`);return {organization_id,shipment_id:t(value(r,'shipment_id'),'shipment_id',i+2),lane_id,carrier:t(value(r,'carrier'),'carrier',i+2),shipment_date:t(value(r,'shipment_date'),'shipment_date',i+2),volume:Math.max(0,Math.round(n(value(r,'volume'),'volume',i+2))),status:t(value(r,'status'),'status',i+2)}})
         const {error}=await supabase.from('shipments').insert(payload);if(error)throw new Error(error.message)
+        await refreshLaneVolumes(supabase, organization_id, false, true)
       }
     }
     return NextResponse.json({imported:dataRows.length,dataset:kind,fileType:filename.split('.').pop()})
