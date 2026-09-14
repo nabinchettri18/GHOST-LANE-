@@ -6,7 +6,20 @@ type ContractRow = { id: string; contract_id?: string; lane_id: string; carrier:
 type ShipmentRow = { id: string; lane_id: string; carrier: string; shipment_date: string; volume: number; status?: string }
 
 const norm = (v: unknown) => String(v ?? '').trim().toLowerCase()
-const daysBefore = (a: string, b: string) => new Date(a).getTime() < new Date(b).getTime()
+
+function evaluateHoldout(train: GhostRiskForest, test: GhostObservation[]) {
+  if (!test.length) return { accuracy: null, precision: null, recall: null, samples: 0 }
+  let correct = 0, tp = 0, fp = 0, fn = 0
+  for (const o of test) {
+    const pred = train.predict(o).risk >= 50 ? 1 : 0
+    const actual = o.label as number
+    if (pred === actual) correct++
+    if (pred && actual) tp++
+    if (pred && !actual) fp++
+    if (!pred && actual) fn++
+  }
+  return { accuracy: correct / test.length, precision: tp + fp ? tp / (tp + fp) : 0, recall: tp + fn ? tp / (tp + fn) : 0, samples: test.length }
+}
 
 export async function POST() {
   const supabase = await createClient()
@@ -26,7 +39,7 @@ export async function POST() {
 
   const allContracts = (contracts ?? []) as ContractRow[]
   const allShipments = (shipments ?? []) as ShipmentRow[]
-  if (allContracts.length < 12) return NextResponse.json({ error: `ML training needs at least 12 contracts with outcomes. Found ${allContracts.length}.` }, { status: 422 })
+  if (allContracts.length < 12) return NextResponse.json({ error: `ML training needs at least 12 contracts. Found ${allContracts.length}.`, completedContracts: 0 }, { status: 422 })
 
   const laneMap = new Map((lanes ?? []).map((l: any) => [l.id, l]))
   const priorByKey = new Map<string, { contracts: number; shipments: number; realized: number; contracted: number }>()
@@ -49,20 +62,23 @@ export async function POST() {
     const label = end < now ? ghostLabel(Number(c.contracted_volume) || 0, materialized) : null
     if (label !== null) observations.push({ ...base, label })
     predictionRows.push({ c, base, materialized, label })
-    if (end < now) {
-      priorByKey.set(key, { contracts: prior.contracts + 1, shipments: prior.shipments + shipmentCount, realized: prior.realized + materialized, contracted: prior.contracted + (Number(c.contracted_volume) || 0) })
-    }
+    if (end < now) priorByKey.set(key, { contracts: prior.contracts + 1, shipments: prior.shipments + shipmentCount, realized: prior.realized + materialized, contracted: prior.contracted + (Number(c.contracted_volume) || 0) })
   }
 
   if (observations.length < 12) return NextResponse.json({ error: `At least 12 completed contract outcomes are required to train GhostLane. Found ${observations.length}.`, completedContracts: observations.length }, { status: 422 })
 
-  const model = new GhostRiskForest().fit(observations)
-  const evaluation = model.evaluate(observations)
+  const split = Math.max(1, Math.floor(observations.length * 0.8))
+  const trainSet = observations.slice(0, split)
+  const holdout = observations.slice(split)
+  if (new Set(trainSet.map(o => o.label)).size < 2) return NextResponse.json({ error: 'Training data contains only one outcome class. GhostLane needs both realized and ghosted historical contracts.' }, { status: 422 })
+  const validationModel = new GhostRiskForest().fit(trainSet, 42)
+  const evaluation = evaluateHoldout(validationModel, holdout)
+  const model = new GhostRiskForest().fit(observations, 42)
   const predictions = predictionRows.map(row => {
     const p = model.predict(row.base)
     const lane = laneMap.get(row.c.lane_id)
     return { contractId: row.c.contract_id ?? row.c.id, lane: lane ? `${lane.origin} → ${lane.destination}` : row.c.lane_id, carrier: row.c.carrier, risk: p.risk, probability: p.probability, band: p.band, confidence: p.confidence, historicalMaterialized: row.materialized, historicalLabel: row.label }
   })
 
-  return NextResponse.json({ model: 'GhostLane Random Forest', version: '0.1', trainedAt: new Date().toISOString(), trainingSamples: observations.length, features: model.featureNames, evaluation, predictions, note: 'Predictions are learned from completed contract outcomes in the authenticated workspace. No synthetic operational records are inserted.' })
+  return NextResponse.json({ model: 'GhostLane Random Forest', version: '0.1', trainedAt: new Date().toISOString(), trainingSamples: observations.length, holdoutSamples: holdout.length, features: model.featureNames, evaluation, predictions, note: 'The model learns from completed contract outcomes in the authenticated workspace. No synthetic operational records are inserted. Validation uses a time-ordered holdout to reduce leakage.' })
 }
