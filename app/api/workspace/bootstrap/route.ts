@@ -1,11 +1,14 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { allowRequest, isSameOrigin } from '@/lib/security'
 
-export async function POST() {
+export async function POST(request: Request) {
+  if (!isSameOrigin(request)) return NextResponse.json({ error: 'Cross-origin request rejected' }, { status: 403 })
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!allowRequest(`bootstrap:${user.id}`, 3, 60_000)) return NextResponse.json({ error: 'Too many workspace initialization attempts' }, { status: 429 })
 
   const { data: existing } = await supabase
     .from('organization_members')
