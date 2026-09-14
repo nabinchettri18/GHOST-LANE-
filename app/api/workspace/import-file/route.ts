@@ -2,22 +2,30 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { parseOperationalFile } from '@/lib/data/parse-file'
 import { validateHeaders, type ImportKind } from '@/lib/data/import'
+import { allowRequest, isSameOrigin } from '@/lib/security'
 
-const MAX_BYTES = 100 * 1024 * 1024
+const MAX_BYTES = 10 * 1024 * 1024
 const kinds: ImportKind[] = ['lanes', 'contracts', 'shipments', 'carriers']
+const allowedExtensions = ['.csv', '.tsv', '.txt', '.json', '.jsonl', '.ndjson', '.xlsx', '.xlsm']
 const n = (v: string, field: string, row: number) => { const x = Number(v); if (!Number.isFinite(x)) throw new Error(`${field} must be numeric on row ${row}`); return x }
 const t = (v: string, field: string, row: number) => { const x = v.trim(); if (!x) throw new Error(`${field} is required on row ${row}`); return x.slice(0,500) }
 
 export async function POST(request: Request) {
+  if (!isSameOrigin(request)) return NextResponse.json({ error: 'Cross-origin request rejected' }, { status: 403 })
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!allowRequest(`import:${user.id}`, 10, 60_000)) return NextResponse.json({ error: 'Too many import attempts. Please wait a minute.' }, { status: 429 })
+
   const form = await request.formData()
   const kind = String(form.get('kind') || '') as ImportKind
   const file = form.get('file')
   if (!kinds.includes(kind)) return NextResponse.json({ error: 'Invalid dataset type' }, { status: 400 })
   if (!(file instanceof File)) return NextResponse.json({ error: 'A file is required' }, { status: 400 })
-  if (!file.size || file.size > MAX_BYTES) return NextResponse.json({ error: file.size ? 'File exceeds the 100 MB limit' : 'File is empty' }, { status: file.size ? 413 : 400 })
+  if (!file.size || file.size > MAX_BYTES) return NextResponse.json({ error: file.size ? 'File exceeds the 10 MB limit' : 'File is empty' }, { status: file.size ? 413 : 400 })
+  const filename = file.name.toLowerCase()
+  if (!allowedExtensions.some(ext => filename.endsWith(ext))) return NextResponse.json({ error: 'Unsupported file type' }, { status: 415 })
+
   const { data: membership } = await supabase.from('organization_members').select('organization_id,role').eq('user_id', user.id).in('role',['owner','admin']).order('created_at',{ascending:true}).limit(1).maybeSingle()
   if (!membership) return NextResponse.json({ error: 'Workspace administrator access is required' }, { status: 403 })
   try {
@@ -51,6 +59,6 @@ export async function POST(request: Request) {
         const {error}=await supabase.from('shipments').insert(payload);if(error)throw new Error(error.message)
       }
     }
-    return NextResponse.json({imported:dataRows.length,dataset:kind,fileType:file.name.split('.').pop()?.toLowerCase()})
+    return NextResponse.json({imported:dataRows.length,dataset:kind,fileType:filename.split('.').pop()})
   } catch (error) { return NextResponse.json({error:error instanceof Error?error.message:'Import failed'},{status:422}) }
 }
