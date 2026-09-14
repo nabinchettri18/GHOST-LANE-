@@ -2,7 +2,7 @@
 
 import { ChangeEvent, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { CheckCircle2, Database, FileUp, ShieldCheck, UploadCloud, XCircle, ArrowLeft } from 'lucide-react'
+import { CheckCircle2, Database, FileUp, ShieldCheck, UploadCloud, XCircle, AlertTriangle, ArrowLeft } from 'lucide-react'
 import { parseCsv, validateHeaders, type ImportKind } from '@/lib/data/import'
 
 const kinds: { id: ImportKind; label: string; description: string }[] = [
@@ -21,6 +21,7 @@ export default function ImportPage() {
   const [file, setFile] = useState<File | null>(null)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
+  const [warning, setWarning] = useState('')
   const [loading, setLoading] = useState(false)
   const [rows, setRows] = useState<string[][]>([])
 
@@ -35,6 +36,7 @@ export default function ImportPage() {
     const next = event.target.files?.[0]
     setError('')
     setSuccess('')
+    setWarning('')
     setRows([])
     setFile(next ?? null)
     if (!next) return
@@ -73,6 +75,7 @@ export default function ImportPage() {
     setLoading(true)
     setError('')
     setSuccess('')
+    setWarning('')
     const form = new FormData()
     form.append('kind', kind)
     form.append('file', file)
@@ -82,6 +85,7 @@ export default function ImportPage() {
       const result = await response.json()
       if (!response.ok) throw new Error(result.error || 'Import failed')
       setSuccess(`${result.imported.toLocaleString()} ${kind} records imported successfully. Refresh the overview to see the updated intelligence.`)
+      if (Array.isArray(result.warnings) && result.warnings.length) setWarning(result.warnings.join(' '))
       setFile(null)
       setRows([])
     } catch (e) {
@@ -105,7 +109,7 @@ export default function ImportPage() {
           <aside className="rounded-2xl border border-[#dbe2ec] bg-white p-4">
             <p className="px-3 pb-3 text-[10px] font-extrabold uppercase tracking-[.14em] text-[#8490a0]">Data type</p>
             {kinds.map((item) => (
-              <button type="button" key={item.id} onClick={() => { setKind(item.id); setRows([]); setFile(null); setError(''); setSuccess('') }} className={`mb-1 w-full rounded-xl p-3 text-left ${kind === item.id ? 'bg-[#edf4ff]' : 'hover:bg-[#f6f8fb]'}`}>
+              <button type="button" key={item.id} onClick={() => { setKind(item.id); setRows([]); setFile(null); setError(''); setSuccess(''); setWarning('') }} className={`mb-1 w-full rounded-xl p-3 text-left ${kind === item.id ? 'bg-[#edf4ff]' : 'hover:bg-[#f6f8fb]'}`}>
                 <div className="text-xs font-extrabold">{item.label}</div>
                 <div className="mt-1 text-[11px] leading-4 text-[#788596]">{item.description}</div>
               </button>
@@ -122,8 +126,8 @@ export default function ImportPage() {
             </div>
 
             <div className="mt-6 rounded-xl border border-[#e5eaf0] bg-[#fafbfd] p-4">
-              <p className="text-[10px] font-black uppercase tracking-[.12em] text-[#8490a0]">Required fields</p>
-              <p className="mt-2 text-xs leading-5 text-[#66758a]">Upload your company's file using the required columns for <strong>{selected.label.toLowerCase()}</strong>. GhostLane will validate the headers before importing anything.</p>
+              <p className="text-[10px] font-black uppercase tracking-[.12em] text-[#8490a0]">Minimum fields</p>
+              <p className="mt-2 text-xs leading-5 text-[#66758a]">Only identity and minimum operational fields are required. Analytics fields such as rates, dates and performance metrics are optional and will be flagged when unavailable.</p>
             </div>
 
             <label className="mt-5 flex min-h-[220px] cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-[#bfcbd9] bg-[#fafbfd] px-6 text-center hover:border-[#1769e0]">
@@ -136,10 +140,12 @@ export default function ImportPage() {
             {file && <div className="mt-4 flex items-center justify-between rounded-xl border border-[#dbe2ec] p-4"><div><p className="text-xs font-bold">{file.name}</p><p className="mt-1 text-[11px] text-[#8490a0]">{(file.size / 1024).toFixed(1)} KB {isText && rows.length ? `· ${rows.length - 1} data rows` : '· ready for server parsing'}</p></div>{isText && rows.length ? <CheckCircle2 size={18} className="text-[#187650]" /> : <FileUp size={18} className="text-[#1769e0]" />}</div>}
             {error && <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-xs font-semibold text-red-700">{error}</div>}
             {success && <div className="mt-4 rounded-xl border border-green-200 bg-green-50 p-4 text-xs font-semibold text-green-700">{success}</div>}
+            {warning && <div className="mt-4 flex gap-2 rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs font-semibold text-amber-800"><AlertTriangle size={16} className="mt-0.5 shrink-0" />{warning}</div>}
 
             {validation && <div className={`mt-4 rounded-xl border p-4 ${validation.missing.length ? 'border-amber-200 bg-amber-50' : 'border-green-200 bg-green-50'}`}>
               <div className="flex items-center gap-2 text-xs font-extrabold">{validation.missing.length ? <XCircle size={16} /> : <CheckCircle2 size={16} />}{validation.missing.length ? 'Validation requires attention' : 'Headers validated'}</div>
               {validation.missing.length > 0 && <p className="mt-2 text-xs">Missing required columns: <strong>{validation.missing.join(', ')}</strong></p>}
+              {!validation.missing.length && validation.optionalMissing.length > 0 && <p className="mt-2 text-xs text-[#7a5a00]">Optional fields not provided: <strong>{validation.optionalMissing.join(', ')}</strong>. The import can continue.</p>}
             </div>}
 
             {rows.length > 1 && !validation?.missing.length && <div className="mt-7 overflow-x-auto rounded-xl border border-[#e1e7ef]"><table className="w-full min-w-[650px] text-left text-[11px]"><thead className="bg-[#fafbfd]"><tr>{rows[0].map((h) => <th key={h} className="px-3 py-2.5 font-extrabold uppercase tracking-wide text-[#8490a0]">{h}</th>)}</tr></thead><tbody>{rows.slice(1, 6).map((r, i) => <tr key={i} className="border-t border-[#edf0f5]">{rows[0].map((_, j) => <td key={j} className="px-3 py-2.5">{r[j] ?? ''}</td>)}</tr>)}</tbody></table></div>}
