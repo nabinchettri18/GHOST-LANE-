@@ -1,8 +1,24 @@
 'use client'
 import { useEffect, useMemo, useState } from 'react'
+import dynamic from 'next/dynamic'
 import { AlertTriangle, Clock3, MapPin, Navigation, Radio, RefreshCw, Route, Siren, Truck } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
-import { LiveOperationsMap } from '@/components/live-operations-map'
+
+const LiveOperationsMap = dynamic(
+  () => import('@/components/live-operations-map').then(m => m.LiveOperationsMap),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-[420px] w-full flex-col items-center justify-center rounded-3xl border border-[#dbe2ec] bg-white p-6 text-center animate-pulse">
+        <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-2xl bg-[#edf4ff] text-[#1769e0]">
+          <MapPin size={20} className="animate-bounce" />
+        </div>
+        <div className="mb-2 h-4 w-48 rounded bg-[#edf0f5]" />
+        <div className="h-3 w-64 rounded bg-[#f3f5f9]" />
+      </div>
+    )
+  }
+)
 
 type Shipment={shipment_id:string;lane_id:string;carrier:string;shipment_date:string;volume:number;status:string;live_lat:number|null;live_lng:number|null;current_eta:string|null;current_route:string|null;last_event_at:string|null;help_status:string|null;vehicle_capacity:number|null;vehicle_id:string|null;risk_score:number|null}
 type Lane={id:string;origin:string;destination:string;mode:string;distance_km:number|null;risk_score:number|null}

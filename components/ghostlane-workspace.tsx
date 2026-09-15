@@ -1,6 +1,7 @@
 'use client'
-import { useMemo, useState } from 'react'
+import { useDeferredValue, useMemo, useState } from 'react'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import { ArrowDownToLine, ArrowRight, BarChart3, BrainCircuit, Check, ChevronRight, CircleAlert, FileText, Filter, Lightbulb, Loader2, MessageSquare, Play, Search, Send, ShieldCheck, SlidersHorizontal, Sparkles, Truck, Upload, X } from 'lucide-react'
 import { Lane360Responsive } from '@/components/lane-360'
 
@@ -16,11 +17,13 @@ const riskLabel=(n:number)=>n>=70?'High':n>=45?'Medium':'Low'
 const cleanId=(id:string)=>(id||'').replace(/-[A-Za-z0-9]{3,6}$/,'').replace(/\s*\[[A-Za-z0-9]{3,6}\]$/,'')
 
 export function GhostLaneWorkspace({view,lanes,shipments,contracts,carriers,company}:Props){
+ const searchParams = useSearchParams()
  const [selected,setSelected]=useState<Lane|null>(null);const [search,setSearch]=useState('');const [simOpen,setSimOpen]=useState(false);const [simLane,setSimLane]=useState<Lane|null>(null);const [demandChange,setDemandChange]=useState(-20);const [copilot,setCopilot]=useState(false);const [toast,setToast]=useState('');const [reviewedIds,setReviewedIds]=useState<string[]>([])
+ const deferredSearch = useDeferredValue(search)
  const stats=useMemo(()=>{const contracted=lanes.reduce((s,l)=>s+Number(l.contracted_volume||0),0);const materialized=lanes.reduce((s,l)=>s+Number(l.materialized_volume||0),0);const ghost=Math.max(0,contracted-materialized);const high=lanes.filter(l=>Number(l.risk_score||0)>=70).length;return {contracted,materialized,ghost,realization:contracted?materialized/contracted*100:0,high}},[lanes])
- const filtered=lanes.filter(l=>`${l.origin} ${l.destination} ${l.carrier||''}`.toLowerCase().includes(search.toLowerCase()))
+ const filtered=useMemo(()=>lanes.filter(l=>`${l.origin} ${l.destination} ${l.carrier||''}`.toLowerCase().includes(deferredSearch.toLowerCase())),[lanes,deferredSearch])
  const recommendations=lanes.map(l=>{const c=Number(l.contracted_volume||0),m=Number(l.materialized_volume||0),r=c?m/c*100:0,risk=Number(l.risk_score||0);return {...l,util:r,action:risk>=70||r<65?'Reduce / Hybrid':risk>=45?'Review':'Maintain',exposure:Math.max(c-m,0)}}).sort((a,b)=>b.exposure-a.exposure)
- const activeView=view||'overview'
+ const activeView=searchParams.get('view')||view||'overview'
  const notify=(x:string)=>{setToast(x);setTimeout(()=>setToast(''),2800)}
  if(selected)return <Lane360Responsive lane={selected} onBack={()=>setSelected(null)} onSim={()=>{setSimLane(selected);setSimOpen(true)}} shipments={shipments} contracts={contracts} />
  return <main className="min-h-[calc(100vh-64px)] bg-[#f6f8fb] px-4 py-7 text-[#08111f] sm:px-6 lg:px-8"><div className="mx-auto max-w-[1480px]">
